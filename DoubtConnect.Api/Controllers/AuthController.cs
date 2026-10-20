@@ -1,4 +1,4 @@
-
+﻿
 using DoubtConnect.Api.DTOs;
 using DoubtConnect.Domain.Entities;
 using DoubtConnect.Domain.Enums;
@@ -24,7 +24,7 @@ public class AuthController : ControllerBase
     private readonly EmailService _emailService;
 
 
-    
+
 
 public AuthController(
     UserManager<ApplicationUser> userManager,
@@ -39,86 +39,128 @@ public AuthController(
 }
 
 
-    [HttpPost("register")]
-    public async Task<IActionResult> Register(
-        [FromBody] RegisterRequest request)
+
+[HttpPost("register")]
+public async Task<IActionResult> Register(
+    [FromBody] RegisterRequest request)
+{
+    var existingUser = await _userManager.FindByEmailAsync(
+        request.Email.Trim());
+
+    if (existingUser != null)
     {
-        var existingUser = await _userManager.FindByEmailAsync(
-            request.Email);
-
-        if (existingUser != null)
+        return Conflict(new
         {
-            return Conflict(new
-            {
-                message = "An account with this email already exists."
-            });
-        }
-
-        var isMentor = request.Role == "Mentor";
-
-        var user = new ApplicationUser
-        {
-            UserName = request.Email.Trim(),
-            Email = request.Email.Trim(),
-            FullName = request.FullName.Trim(),
-            Role = isMentor ? UserRole.Mentor : UserRole.Student,
-            CreatedAtUtc = DateTime.UtcNow
-        };
-
-        var createResult = await _userManager.CreateAsync(
-            user, request.Password);
-
-        if (!createResult.Succeeded)
-        {
-            return BadRequest(new
-            {
-                errors = createResult.Errors.Select(
-                    error => error.Description)
-            });
-        }
-
-        var roleResult = await _userManager.AddToRoleAsync(
-            user, request.Role);
-
-        if (!roleResult.Succeeded)
-        {
-            await _userManager.DeleteAsync(user);
-
-            return BadRequest(new
-            {
-                errors = roleResult.Errors.Select(
-                    error => error.Description)
-            });
-        }
-
-        if (isMentor)
-        {
-            _dbContext.MentorProfiles.Add(new MentorProfile
-            {
-                UserId = user.Id,
-                Expertise = "General"
-            });
-        }
-        else
-        {
-            _dbContext.StudentProfiles.Add(new StudentProfile
-            {
-                UserId = user.Id
-            });
-        }
-
-        await _dbContext.SaveChangesAsync();
-
-        return Ok(new
-        {
-            message = "Registration successful.",
-            userId = user.Id,
-            fullName = user.FullName,
-            email = user.Email,
-            role = request.Role
+            message = "An account with this email already exists."
         });
     }
-    
+
+    var isMentor = request.Role == "Mentor";
+
+    var user = new ApplicationUser
+    {
+        UserName = request.Email.Trim(),
+        Email = request.Email.Trim(),
+        FullName = request.FullName.Trim(),
+        Role = isMentor ? UserRole.Mentor : UserRole.Student,
+        CreatedAtUtc = DateTime.UtcNow
+    };
+
+    var createResult = await _userManager.CreateAsync(
+        user, request.Password);
+
+    if (!createResult.Succeeded)
+    {
+        return BadRequest(new
+        {
+            errors = createResult.Errors.Select(
+                error => error.Description)
+        });
+    }
+
+    var roleResult = await _userManager.AddToRoleAsync(
+        user, request.Role);
+
+    if (!roleResult.Succeeded)
+    {
+        await _userManager.DeleteAsync(user);
+
+        return BadRequest(new
+        {
+            errors = roleResult.Errors.Select(
+                error => error.Description)
+        });
+    }
+
+    if (isMentor)
+    {
+        _dbContext.MentorProfiles.Add(new MentorProfile
+        {
+            UserId = user.Id,
+            Expertise = "General"
+        });
+    }
+    else
+    {
+        _dbContext.StudentProfiles.Add(new StudentProfile
+        {
+            UserId = user.Id
+        });
+    }
+
+    await _dbContext.SaveChangesAsync();
+
+    // Generate the email confirmation token.
+    var confirmationToken =
+        await _userManager.GenerateEmailConfirmationTokenAsync(user);
+
+    var encodedToken = WebEncoders.Base64UrlEncode(
+        Encoding.UTF8.GetBytes(confirmationToken));
+
+    var confirmationLink =
+        $"http://localhost:4200/confirm-email?userId={user.Id}" +
+        $"&token={Uri.EscapeDataString(encodedToken)}";
+
+    // Send the verification email.
+    var safeFullName =
+        System.Net.WebUtility.HtmlEncode(user.FullName);
+
+    var safeConfirmationLink =
+        System.Net.WebUtility.HtmlEncode(confirmationLink);
+
+    var htmlBody = $"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: auto; padding: 24px;">
+            <h2>Welcome to DoubtConnect!</h2>
+            <p>Hi {safeFullName},</p>
+            <p>Thank you for creating your account.</p>
+            <p>Please verify your email address to activate your account.</p>
+            <p>
+                <a href="{safeConfirmationLink}"
+                   style="background-color:#2563eb;color:white;padding:12px 20px;text-decoration:none;border-radius:6px;">
+                    Verify Email
+                </a>
+            </p>
+            <p>If you did not create this account, you can ignore this email.</p>
+            <p>Best regards,<br><strong>Team DoubtConnect</strong></p>
+        </div>
+        """;
+
+    await _emailService.SendEmailAsync(
+        user.Email!,
+        "Verify your DoubtConnect email",
+        htmlBody);
+
+    return Ok(new
+    {
+        message = "Registration successful. Please check your email to verify your account.",
+        userId = user.Id,
+        fullName = user.FullName,
+        email = user.Email,
+        role = request.Role
+    });
+}
+
+
 [HttpPost("login")]
 public async Task<IActionResult> Login(
     [FromBody] LoginRequest request)
@@ -132,6 +174,15 @@ public async Task<IActionResult> Login(
         return Unauthorized(new
         {
             message = "Invalid email or password."
+        });
+    }
+
+    // Require email verification before allowing login.
+    if (!user.EmailConfirmed)
+    {
+        return Unauthorized(new
+        {
+            message = "Please verify your email before logging in."
         });
     }
 
@@ -171,7 +222,8 @@ public async Task<IActionResult> Login(
         expires: DateTime.UtcNow.AddMinutes(30),
         signingCredentials: credentials);
 
-    var accessToken = new JwtSecurityTokenHandler().WriteToken(token);
+    var accessToken = new JwtSecurityTokenHandler()
+        .WriteToken(token);
 
     return Ok(new
     {
@@ -187,6 +239,7 @@ public async Task<IActionResult> Login(
         }
     });
 }
+
 
 [HttpPost("forgot-password")]
 public async Task<IActionResult> ForgotPassword(
@@ -280,5 +333,94 @@ public async Task<IActionResult> ResetPassword(
         message = "Password reset successful. You can now log in with your new password."
     });
 }
+
+[HttpPost("confirm-email")]
+public async Task<IActionResult> ConfirmEmail(
+    [FromBody] ConfirmEmailRequest request)
+{
+    var user = await _userManager.FindByIdAsync(
+        request.UserId.ToString());
+
+    if (user == null)
+    {
+        return BadRequest(new
+        {
+            message = "The confirmation link is invalid or has expired."
+        });
+    }
+
+    string decodedToken;
+
+    try
+    {
+        decodedToken = Encoding.UTF8.GetString(
+            WebEncoders.Base64UrlDecode(request.Token));
+    }
+    catch (FormatException)
+    {
+        return BadRequest(new
+        {
+            message = "The confirmation link is invalid or has expired."
+        });
+    }
+
+    var result = await _userManager.ConfirmEmailAsync(
+        user, decodedToken);
+
+    if (!result.Succeeded)
+    {
+        return BadRequest(new
+        {
+            errors = result.Errors.Select(
+                error => error.Description)
+        });
+    }
+
+    return Ok(new
+    {
+        message = "Your email has been confirmed. You can now log in."
+    });
+}
+
+[HttpPost("resend-confirmation")]
+public async Task<IActionResult> ResendConfirmation(
+    [FromBody] ResendConfirmationRequest request)
+{
+    var user = await _userManager.FindByEmailAsync(request.Email);
+
+    if (user == null || user.EmailConfirmed)
+    {
+        return Ok(new
+        {
+            message = "If verification is required, an email will be sent."
+        });
+    }
+
+    var confirmationToken =
+        await _userManager.GenerateEmailConfirmationTokenAsync(user);
+
+    var encodedToken = WebEncoders.Base64UrlEncode(
+        Encoding.UTF8.GetBytes(confirmationToken));
+
+    var confirmationLink =
+        $"http://localhost:4200/confirm-email?userId={user.Id}&token={Uri.EscapeDataString(encodedToken)}";
+
+    var emailBody = $"""
+        <h2>Verify your DoubtConnect email</h2>
+        <p>Click the link below to verify your account.</p>
+        <p><a href="{confirmationLink}">Verify Email</a></p>
+        """;
+
+    await _emailService.SendEmailAsync(
+        user.Email!,
+        "Verify your DoubtConnect email",
+        emailBody);
+
+    return Ok(new
+    {
+        message = "If verification is required, an email will be sent."
+    });
+}
+
 
 }
