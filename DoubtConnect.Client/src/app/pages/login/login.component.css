@@ -1,0 +1,89 @@
+
+.auth-page {
+  min-height: 100vh;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: #f7f5ff;
+  font-family: Arial, sans-serif;
+}
+
+.auth-card {
+  width: 100%;
+  max-width: 420px;
+  padding: 40px;
+  background: white;
+  border-radius: 20px;
+  box-shadow: 0 12px 40px rgba(50, 30, 90, 0.1);
+}
+
+.brand {
+  color: #7047eb;
+  font-size: 24px;
+  font-weight: bold;
+  text-decoration: none;
+}
+
+h1 {
+  margin: 28px 0 8px;
+  color: #25213a;
+}
+
+.subtitle {
+  color: #777286;
+  line-height: 1.5;
+  margin-bottom: 28px;
+}
+
+label {
+  display: block;
+  margin: 18px 0 8px;
+  color: #393449;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 13px;
+  border: 1px solid #ddd8e9;
+  border-radius: 9px;
+  font-size: 15px;
+}
+
+input:focus {
+  outline: 2px solid #b6a2ff;
+  border-color: #7047eb;
+}
+
+button {
+  width: 100%;
+  margin-top: 26px;
+  padding: 14px;
+  border: none;
+  border-radius: 9px;
+  background: #7047eb;
+  color: white;
+  font-size: 16px;
+  font-weight: bold;
+  cursor: pointer;
+}
+
+button:hover {
+  background: #5932d0;
+}
+
+.switch-page {
+  margin-top: 24px;
+  text-align: center;
+  font-size: 14px;
+  color: #777286;
+}
+
+.switch-page a {
+  color: #7047eb;
+  font-weight: bold;
+  text-decoration: none;
+}

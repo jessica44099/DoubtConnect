@@ -1,0 +1,82 @@
+
+<div class="auth-page">
+  <div class="auth-card">
+    <a routerLink="/" class="brand">DoubtConnect</a>
+
+    <h1>Create your account</h1>
+    <p class="subtitle">Join our community of students and mentors.</p>
+
+    <form [formGroup]="registerForm" (ngSubmit)="onSubmit()">
+      <label for="fullName">Full name *</label>
+      <input
+        id="fullName"
+        type="text"
+        formControlName="fullName"
+        placeholder="Enter your full name"
+        autocomplete="name"
+      />
+      <small class="error" *ngIf="registerForm.controls.fullName.touched && registerForm.controls.fullName.invalid">
+        Please enter your name (maximum 100 characters).
+      </small>
+
+      <label for="email">Email address *</label>
+      <input
+        id="email"
+        type="email"
+        formControlName="email"
+        placeholder="you@example.com"
+        autocomplete="email"
+      />
+      <small class="error" *ngIf="registerForm.controls.email.touched && registerForm.controls.email.invalid">
+        Enter a valid email address.
+      </small>
+
+      <label for="phoneNumber">Phone number (optional)</label>
+      <input
+        id="phoneNumber"
+        type="tel"
+        formControlName="phoneNumber"
+        placeholder="Enter your phone number"
+        autocomplete="tel"
+      />
+
+      <label for="password">Password *</label>
+      <input
+        id="password"
+        type="password"
+        formControlName="password"
+        placeholder="At least 8 characters"
+        autocomplete="new-password"
+      />
+      <small class="error" *ngIf="registerForm.controls.password.touched && registerForm.controls.password.invalid">
+        Password must contain at least 8 characters.
+      </small>
+
+      <label for="role">I want to join as *</label>
+      <select id="role" formControlName="role">
+        <option value="Student">Student</option>
+        <option value="Mentor">Mentor</option>
+      </select>
+
+      <p class="error" *ngIf="errorMessage">
+  {{ errorMessage }}
+</p>
+
+<p *ngIf="successMessage" class="success-message">
+  {{ successMessage }}
+  <a routerLink="/login">Log in</a>
+</p>
+
+<button type="submit" [disabled]="isLoading">
+  {{ isLoading ? 'Creating Account...' : 'Create Account' }}
+</button>
+
+    
+    </form>
+
+    <p class="switch-page">
+      Already have an account?
+      <a routerLink="/login">Log in</a>
+    </p>
+  </div>
+</div>

@@ -1,0 +1,22 @@
+/* You can add global styles to this file, and also import other style files */
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  margin: 0;
+  background: #fcfbff;
+  font-family: Inter, "Segoe UI", Arial, sans-serif;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+a {
+  -webkit-tap-highlight-color: transparent;
+}

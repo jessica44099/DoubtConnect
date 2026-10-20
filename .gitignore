@@ -1,0 +1,30 @@
+﻿# Secrets and local configuration
+appsettings.json
+appsettings.Development.json
+appsettings.*.json
+!.gitignore
+.env
+.env.*
+!.env.example
+*.user
+*.pfx
+*.key
+*.pem
+*.publishsettings
+secrets.json
+
+# .NET generated files
+bin/
+obj/
+.vs/
+
+# Angular and Node generated files
+node_modules/
+.angular/
+dist/
+coverage/
+
+# IDE and operating system files
+.vscode/
+.DS_Store
+Thumbs.db

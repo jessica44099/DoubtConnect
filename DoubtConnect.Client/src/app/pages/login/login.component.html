@@ -1,0 +1,63 @@
+<div class="auth-page">
+  <div class="auth-card">
+    <a routerLink="/home" class="brand">DoubtConnect</a>
+
+    <h1>Welcome back!</h1>
+    <p class="subtitle">
+      Log in to continue your learning journey.
+    </p>
+
+    <form [formGroup]="loginForm" (ngSubmit)="onSubmit()">
+      <label for="email">Email address</label>
+      <input
+        id="email"
+        type="email"
+        formControlName="email"
+        placeholder="Enter your email"
+        autocomplete="email"
+      />
+
+      <small
+        class="error"
+        *ngIf="loginForm.controls.email.touched &&
+               loginForm.controls.email.invalid"
+      >
+        Please enter a valid email address.
+      </small>
+
+      <label for="password">Password</label>
+      <input
+        id="password"
+        type="password"
+        formControlName="password"
+        placeholder="Enter your password"
+        autocomplete="current-password"
+      />
+
+      <small
+        class="error"
+        *ngIf="loginForm.controls.password.touched &&
+               loginForm.controls.password.invalid"
+      >
+        Please enter your password.
+      </small>
+
+      <p class="error" *ngIf="errorMessage">
+        {{ errorMessage }}
+      </p>
+
+      <p class="success-message" *ngIf="successMessage">
+        {{ successMessage }}
+      </p>
+
+      <button type="submit" [disabled]="isLoading">
+        {{ isLoading ? 'Logging In...' : 'Log In' }}
+      </button>
+    </form>
+
+    <p class="switch-page">
+      Don't have an account?
+      <a routerLink="/register">Create one</a>
+    </p>
+  </div>
+</div>
