@@ -200,6 +200,51 @@ namespace DoubtConnect.Infrastructure.Data.Migrations
                     b.ToTable("Bookings");
                 });
 
+            modelBuilder.Entity("DoubtConnect.Domain.Entities.MentorCalendarEvent", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<string>("ActivityType")
+                        .IsRequired()
+                        .HasMaxLength(50)
+                        .HasColumnType("nvarchar(50)");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.Property<TimeOnly>("EndTime")
+                        .HasColumnType("time");
+
+                    b.Property<DateOnly>("EventDate")
+                        .HasColumnType("date");
+
+                    b.Property<Guid>("MentorId")
+                        .HasColumnType("uniqueidentifier");
+
+                    b.Property<TimeOnly>("StartTime")
+                        .HasColumnType("time");
+
+                    b.Property<string>("StudentName")
+                        .HasMaxLength(150)
+                        .HasColumnType("nvarchar(150)");
+
+                    b.Property<string>("Title")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("nvarchar(200)");
+
+                    b.Property<DateTime?>("UpdatedAtUtc")
+                        .HasColumnType("datetime2");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MentorId", "EventDate", "StartTime");
+
+                    b.ToTable("MentorCalendarEvents");
+                });
+
             modelBuilder.Entity("DoubtConnect.Domain.Entities.MentorProfile", b =>
                 {
                     b.Property<Guid>("Id")
@@ -603,6 +648,17 @@ namespace DoubtConnect.Infrastructure.Data.Migrations
                     b.Navigation("ShiftedFromBooking");
 
                     b.Navigation("Student");
+                });
+
+            modelBuilder.Entity("DoubtConnect.Domain.Entities.MentorCalendarEvent", b =>
+                {
+                    b.HasOne("DoubtConnect.Domain.Entities.ApplicationUser", "Mentor")
+                        .WithMany()
+                        .HasForeignKey("MentorId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Mentor");
                 });
 
             modelBuilder.Entity("DoubtConnect.Domain.Entities.MentorProfile", b =>
