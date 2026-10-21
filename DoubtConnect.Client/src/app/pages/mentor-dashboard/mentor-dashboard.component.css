@@ -35,7 +35,8 @@
 
 button,
 input,
-select {
+select,
+textarea {
   font: inherit;
 }
 
@@ -353,6 +354,7 @@ h1 {
 }
 
 .calendar-event strong {
+  padding-right: 10px;
   font-size: 10px;
   font-weight: 700;
   overflow-wrap: anywhere;
@@ -385,6 +387,18 @@ h1 {
   background: #fcebef;
   color: #8c3850;
   border-left-color: #d77991;
+}
+
+.event-doubt-session {
+  background: #e4f6ee;
+  color: #246b4a;
+  border-left-color: #429b70;
+}
+
+.event-other {
+  background: #edf0f7;
+  color: #46516e;
+  border-left-color: #8995b3;
 }
 
 .remove-event {
@@ -449,13 +463,21 @@ h1 {
   background: #fdfcff;
 }
 
-.event-editor h3 {
+.editor-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.editor-heading h3 {
   margin: 0 0 4px;
   font-size: 13px;
 }
 
-.event-editor > p {
-  margin: 0 0 12px;
+.editor-heading p {
+  margin: 0;
   color: #827a91;
   font-size: 10px;
   line-height: 1.5;
@@ -509,11 +531,13 @@ h1 {
 .dashboard-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: start;
   gap: 12px;
   margin-top: 16px;
 }
 
 .dashboard-card {
+  min-width: 0;
   padding: 16px 18px;
 }
 
@@ -527,6 +551,102 @@ h1 {
   color: #81798e;
   font-size: 11px;
   line-height: 1.5;
+}
+
+/* Mentor profile editor */
+
+.profile-editor {
+  min-width: 0;
+}
+
+.profile-card-heading {
+  margin-bottom: 18px;
+}
+
+.profile-card-heading .eyebrow {
+  margin-bottom: 6px;
+}
+
+.profile-card-heading h2 {
+  margin: 0 0 6px;
+  color: #29243d;
+  font-size: 16px;
+}
+
+.profile-card-heading > p:last-child {
+  margin: 0;
+  color: #81798e;
+  font-size: 11px;
+  line-height: 1.5;
+}
+
+.profile-form {
+  display: grid;
+  gap: 14px;
+}
+
+.profile-form label {
+  display: grid;
+  gap: 7px;
+  color: #454963;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.profile-form input,
+.profile-form select,
+.profile-form textarea {
+  box-sizing: border-box;
+  display: block;
+  width: 100%;
+  min-width: 0;
+  padding: 10px 12px;
+  border: 1px solid #e2e4ed;
+  border-radius: 8px;
+  background: #fff;
+  color: #252843;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 400;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.profile-form textarea {
+  min-height: 92px;
+  resize: vertical;
+  line-height: 1.5;
+}
+
+.profile-form input::placeholder,
+.profile-form textarea::placeholder {
+  color: #aaa6b7;
+}
+
+.profile-form input:focus,
+.profile-form select:focus,
+.profile-form textarea:focus {
+  outline: none;
+  border-color: #9b83d0;
+  box-shadow: 0 0 0 3px rgba(104, 65, 200, 0.08);
+}
+
+.profile-form small {
+  color: #7b7e92;
+  font-size: 10px;
+  font-weight: 400;
+  text-align: right;
+}
+
+.profile-form .save-button {
+  justify-self: start;
+  min-width: 130px;
+  margin-top: 2px;
+  padding: 9px 14px;
+}
+
+.profile-form .save-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.65;
 }
 
 @media (max-width: 950px) {
@@ -574,11 +694,19 @@ h1 {
     padding: 10px;
   }
 
+  .calendar-actions .save-button {
+    align-self: flex-start;
+  }
+
   .editor-fields {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .dashboard-grid {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .dashboard-card {
+    padding: 14px;
   }
 }

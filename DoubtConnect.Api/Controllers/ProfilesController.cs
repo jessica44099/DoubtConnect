@@ -1,4 +1,3 @@
-
 using System.Security.Claims;
 using DoubtConnect.Domain.Entities;
 using DoubtConnect.Domain.Enums;
@@ -80,7 +79,6 @@ public class ProfilesController : ControllerBase
                     profile.Id,
                     profile.Expertise,
                     profile.Bio,
-                    profile.HourlyRate,
                     profile.TotalDoubtsCleared
                 }
             });
@@ -99,10 +97,12 @@ public class ProfilesController : ControllerBase
             return Unauthorized();
 
         if (request.EducationLevel?.Length > 100)
+        {
             return BadRequest(new
             {
                 message = "Education level cannot exceed 100 characters."
             });
+        }
 
         var profile = await _db.StudentProfiles
             .FirstOrDefaultAsync(p => p.UserId == userId);
@@ -143,29 +143,51 @@ public class ProfilesController : ControllerBase
         if (!TryGetUserId(out var userId))
             return Unauthorized();
 
-        if (string.IsNullOrWhiteSpace(request.Expertise))
-            return BadRequest(new
-            {
-                message = "Expertise is required."
-            });
+        // Only these three teaching subjects are supported.
+        var allowedSubjects = new HashSet<string>(
+            new[] { "Quant", "VARC", "DILR" },
+            StringComparer.OrdinalIgnoreCase);
 
-        if (request.Expertise.Trim().Length > 250)
+        // Accept one or multiple subjects separated by commas.
+        var selectedSubjects = (request.Expertise ?? string.Empty)
+            .Split(
+                ',',
+                StringSplitOptions.RemoveEmptyEntries |
+                StringSplitOptions.TrimEntries)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (selectedSubjects.Count == 0)
+        {
             return BadRequest(new
             {
-                message = "Expertise cannot exceed 250 characters."
+                message = "Please select at least one teaching subject."
             });
+        }
+
+        if (selectedSubjects.Any(
+            subject => !allowedSubjects.Contains(subject)))
+        {
+            return BadRequest(new
+            {
+                message = "Only Quant, VARC, and DILR are supported."
+            });
+        }
 
         if (request.Bio?.Length > 2000)
+        {
             return BadRequest(new
             {
                 message = "Bio cannot exceed 2000 characters."
             });
+        }
 
-        if (request.HourlyRate is < 0)
-            return BadRequest(new
-            {
-                message = "Hourly rate cannot be negative."
-            });
+        // Save subjects in a consistent order.
+        var normalizedSubjects = new[] { "Quant", "VARC", "DILR" }
+            .Where(subject => selectedSubjects.Contains(
+                subject,
+                StringComparer.OrdinalIgnoreCase))
+            .ToList();
 
         var profile = await _db.MentorProfiles
             .FirstOrDefaultAsync(p => p.UserId == userId);
@@ -181,11 +203,11 @@ public class ProfilesController : ControllerBase
             _db.MentorProfiles.Add(profile);
         }
 
-        profile.Expertise = request.Expertise.Trim();
+        profile.Expertise = string.Join(", ", normalizedSubjects);
+
         profile.Bio = string.IsNullOrWhiteSpace(request.Bio)
             ? null
             : request.Bio.Trim();
-        profile.HourlyRate = request.HourlyRate;
 
         await _db.SaveChangesAsync();
 
@@ -195,12 +217,12 @@ public class ProfilesController : ControllerBase
             profile.Id,
             profile.Expertise,
             profile.Bio,
-            profile.HourlyRate,
             profile.TotalDoubtsCleared
         });
     }
 
     // GET api/profiles/mentors/{userId}
+    // Returns public mentor details without private or payment-related fields.
     [HttpGet("mentors/{userId:guid}")]
     public async Task<IActionResult> GetPublicMentorProfile(Guid userId)
     {
@@ -213,13 +235,17 @@ public class ProfilesController : ControllerBase
                 name = p.User.FullName,
                 p.Expertise,
                 p.Bio,
-                p.HourlyRate,
                 p.TotalDoubtsCleared
             })
             .FirstOrDefaultAsync();
 
         if (profile is null)
-            return NotFound(new { message = "Mentor profile not found." });
+        {
+            return NotFound(new
+            {
+                message = "Mentor profile not found."
+            });
+        }
 
         return Ok(profile);
     }
@@ -233,6 +259,6 @@ public sealed class StudentProfileRequest
 public sealed class MentorProfileRequest
 {
     public string Expertise { get; set; } = string.Empty;
+
     public string? Bio { get; set; }
-    public decimal? HourlyRate { get; set; }
 }

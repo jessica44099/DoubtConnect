@@ -1,8 +1,12 @@
 
 import { CommonModule } from '@angular/common';
+import {
+  HttpClient,
+  HttpHeaders,
+  HttpErrorResponse
+} from '@angular/common/http';
 import { Component, OnInit } from '@angular/core';
 import { FormsModule } from '@angular/forms';
-import { HttpErrorResponse } from '@angular/common/http';
 import { Router, RouterLink } from '@angular/router';
 
 import {
@@ -23,6 +27,13 @@ interface CalendarDay {
   isToday: boolean;
 }
 
+interface MentorProfileResponse {
+  profile?: {
+    expertise?: string | null;
+    bio?: string | null;
+  } | null;
+}
+
 @Component({
   selector: 'app-mentor-dashboard',
   standalone: true,
@@ -31,9 +42,16 @@ interface CalendarDay {
   styleUrl: './mentor-dashboard.component.css'
 })
 export class MentorDashboardComponent implements OnInit {
+  private readonly apiUrl = 'http://localhost:5234/api';
+
   readonly daysOfWeek = [
-    'Sunday', 'Monday', 'Tuesday', 'Wednesday',
-    'Thursday', 'Friday', 'Saturday'
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday'
   ];
 
   readonly hours = Array.from({ length: 10 }, (_, i) => i + 10);
@@ -48,6 +66,12 @@ export class MentorDashboardComponent implements OnInit {
     'Other'
   ];
 
+  readonly mentorSubjects = ['Quant', 'VARC', 'DILR'];
+
+  // Dashboard navigation
+  activeSection: 'profile' | 'calendar' | 'sessions' = 'profile';
+
+  // Weekly calendar
   weeklyBlocks: WeeklyAvailabilityBlock[] = [];
   manualEvents: MentorCalendarEvent[] = [];
   calendarDays: CalendarDay[] = [];
@@ -68,17 +92,68 @@ export class MentorDashboardComponent implements OnInit {
   errorMessage = '';
   successMessage = '';
 
+  // Mentor profile
+  profileExpertise = '';
+  selectedSubjects: string[] = [];
+  profileBio = '';
+  profileLoading = false;
+  profileSaving = false;
+
   constructor(
     private router: Router,
     private weeklyAvailabilityService: WeeklyAvailabilityService,
-    private mentorCalendarEventService: MentorCalendarEventService
+    private mentorCalendarEventService: MentorCalendarEventService,
+    private http: HttpClient
   ) {}
 
   ngOnInit(): void {
     this.buildCalendarDays();
     this.loadWeeklyAvailability();
     this.loadManualEvents();
+    this.loadMentorProfile();
   }
+
+  // -------------------------
+  // Authentication
+  // -------------------------
+
+  private getAuthHeaders(): HttpHeaders {
+    const token = sessionStorage.getItem('accessToken');
+
+    return new HttpHeaders({
+      Authorization: `Bearer ${token ?? ''}`
+    });
+  }
+
+  logout(): void {
+    sessionStorage.removeItem('accessToken');
+    sessionStorage.removeItem('user');
+    this.router.navigate(['/login']);
+  }
+
+  // -------------------------
+  // Dashboard navigation
+  // -------------------------
+
+  showSection(section: 'profile' | 'calendar' | 'sessions'): void {
+    this.activeSection = section;
+    this.errorMessage = '';
+    this.successMessage = '';
+
+    if (section === 'calendar') {
+      this.buildCalendarDays();
+      this.loadWeeklyAvailability();
+      this.loadManualEvents();
+    }
+
+    if (section === 'profile') {
+      this.loadMentorProfile();
+    }
+  }
+
+  // -------------------------
+  // Calendar date helpers
+  // -------------------------
 
   private getSunday(date: Date): Date {
     const result = new Date(date);
@@ -88,9 +163,11 @@ export class MentorDashboardComponent implements OnInit {
   }
 
   private sameDate(a: Date, b: Date): boolean {
-    return a.getFullYear() === b.getFullYear() &&
+    return (
+      a.getFullYear() === b.getFullYear() &&
       a.getMonth() === b.getMonth() &&
-      a.getDate() === b.getDate();
+      a.getDate() === b.getDate()
+    );
   }
 
   private formatDateForApi(date: Date): string {
@@ -123,6 +200,7 @@ export class MentorDashboardComponent implements OnInit {
     const firstMonth = first.toLocaleDateString('en-IN', {
       month: 'short'
     });
+
     const lastMonth = last.toLocaleDateString('en-IN', {
       month: 'short'
     });
@@ -165,6 +243,107 @@ export class MentorDashboardComponent implements OnInit {
     this.loadManualEvents();
   }
 
+  // -------------------------
+  // Mentor profile
+  // -------------------------
+
+  loadMentorProfile(): void {
+    this.profileLoading = true;
+
+    this.http.get<MentorProfileResponse>(
+      `${this.apiUrl}/profiles/me`,
+      { headers: this.getAuthHeaders() }
+    ).subscribe({
+      next: response => {
+        const profile = response.profile;
+
+        this.profileExpertise = profile?.expertise ?? '';
+
+        this.selectedSubjects = this.profileExpertise
+          .split(',')
+          .map(subject => subject.trim())
+          .filter(subject => this.mentorSubjects.includes(subject));
+
+        this.profileBio = profile?.bio ?? '';
+        this.profileLoading = false;
+      },
+      error: (error: HttpErrorResponse) => {
+        this.profileLoading = false;
+        this.errorMessage =
+          error.error?.message ??
+          'Could not load your mentor profile. Please sign in again if your session has expired.';
+      }
+    });
+  }
+
+  toggleSubject(subject: string, checked: boolean): void {
+    if (!this.mentorSubjects.includes(subject)) {
+      return;
+    }
+
+    if (checked) {
+      if (!this.selectedSubjects.includes(subject)) {
+        this.selectedSubjects = [
+          ...this.selectedSubjects,
+          subject
+        ];
+      }
+    } else {
+      this.selectedSubjects = this.selectedSubjects.filter(
+        item => item !== subject
+      );
+    }
+
+    this.profileExpertise = this.selectedSubjects.join(', ');
+  }
+
+  saveMentorProfile(): void {
+    this.errorMessage = '';
+    this.successMessage = '';
+
+    const selectedSubjects = this.mentorSubjects.filter(
+      subject => this.selectedSubjects.includes(subject)
+    );
+
+    if (selectedSubjects.length === 0) {
+      this.errorMessage = 'Please select at least one teaching subject.';
+      return;
+    }
+
+    if (this.profileBio.length > 2000) {
+      this.errorMessage = 'Bio cannot exceed 2000 characters.';
+      return;
+    }
+
+    this.profileSaving = true;
+
+    this.http.put(
+      `${this.apiUrl}/profiles/mentor`,
+      {
+        expertise: selectedSubjects.join(', '),
+        bio: this.profileBio.trim() || null
+      },
+      { headers: this.getAuthHeaders() }
+    ).subscribe({
+      next: () => {
+        this.profileSaving = false;
+        this.profileExpertise = selectedSubjects.join(', ');
+        this.selectedSubjects = [...selectedSubjects];
+        this.successMessage = 'Mentor profile saved successfully.';
+      },
+      error: (error: HttpErrorResponse) => {
+        this.profileSaving = false;
+        this.errorMessage =
+          error.error?.message ??
+          'Could not save your mentor profile. Please try again.';
+      }
+    });
+  }
+
+  // -------------------------
+  // Weekly availability
+  // -------------------------
+
   loadWeeklyAvailability(): void {
     this.isLoading = true;
     this.errorMessage = '';
@@ -182,6 +361,139 @@ export class MentorDashboardComponent implements OnInit {
       }
     });
   }
+
+  saveWeeklyAvailability(): void {
+    this.errorMessage = '';
+    this.successMessage = '';
+
+    for (const block of this.weeklyBlocks) {
+      if (
+        !block.startTime ||
+        !block.endTime ||
+        block.startTime >= block.endTime
+      ) {
+        this.errorMessage =
+          'Every event must have a valid start and end time.';
+        return;
+      }
+
+      if (block.startTime < '10:00' || block.endTime > '20:00') {
+        this.errorMessage =
+          'Events must be within working hours (10 AM–8 PM).';
+        return;
+      }
+
+      block.isFree = block.activityType === 'Free';
+    }
+
+    for (const day of this.daysOfWeek) {
+      const dayNumber = this.daysOfWeek.indexOf(day);
+
+      const blocks = this.weeklyBlocks
+        .filter(block =>
+          block.dayOfWeek === dayNumber &&
+          block.activityType !== 'Free'
+        )
+        .sort((a, b) => a.startTime.localeCompare(b.startTime));
+
+      for (let i = 1; i < blocks.length; i++) {
+        if (blocks[i].startTime < blocks[i - 1].endTime) {
+          this.errorMessage =
+            `Events overlap on ${day}. Please adjust their times.`;
+          return;
+        }
+      }
+    }
+
+    this.isSaving = true;
+
+    this.weeklyAvailabilityService
+      .saveWeeklyAvailability(this.weeklyBlocks)
+      .subscribe({
+        next: response => {
+          this.isSaving = false;
+          this.successMessage =
+            `${response.message} (${response.blocksSaved} events saved).`;
+          this.loadWeeklyAvailability();
+        },
+        error: (error: HttpErrorResponse) => {
+          this.isSaving = false;
+          this.errorMessage =
+            error.error?.message || 'Could not save the calendar.';
+        }
+      });
+  }
+
+  getBusyBlocks(dayOfWeek: number): WeeklyAvailabilityBlock[] {
+    return this.weeklyBlocks
+      .filter(block =>
+        block.dayOfWeek === dayOfWeek &&
+        block.activityType !== 'Free'
+      )
+      .sort((a, b) => a.startTime.localeCompare(b.startTime));
+  }
+
+  getBlockTop(block: WeeklyAvailabilityBlock): number {
+    const [hours, minutes] = block.startTime.split(':').map(Number);
+    return ((hours * 60 + minutes) - 600) / 60 * 64;
+  }
+
+  getBlockHeight(block: WeeklyAvailabilityBlock): number {
+    const [startHours, startMinutes] =
+      block.startTime.split(':').map(Number);
+
+    const [endHours, endMinutes] =
+      block.endTime.split(':').map(Number);
+
+    const duration =
+      (endHours * 60 + endMinutes) -
+      (startHours * 60 + startMinutes);
+
+    return Math.max(duration / 60 * 64, 24);
+  }
+
+  getBlockStyle(
+    block: { startTime: string; endTime: string }
+  ): Record<string, string> {
+    const top = this.getBlockTop(block as WeeklyAvailabilityBlock);
+    const height = this.getBlockHeight(block as WeeklyAvailabilityBlock);
+
+    return {
+      top: `${top}px`,
+      height: `${height}px`
+    };
+  }
+
+  addBusyBlock(dayOfWeek: number, startHour = 10): void {
+    if (startHour >= 20) {
+      this.errorMessage = 'Choose a time within 10 AM–8 PM.';
+      return;
+    }
+
+    const startTime = `${String(startHour).padStart(2, '0')}:00`;
+    const endTime =
+      `${String(Math.min(startHour + 1, 20)).padStart(2, '0')}:00`;
+
+    this.weeklyBlocks.push({
+      dayOfWeek,
+      startTime,
+      endTime,
+      isFree: false,
+      activityType: 'Meeting',
+      title: ''
+    });
+
+    this.errorMessage = '';
+    this.successMessage = '';
+  }
+
+  removeBlock(block: WeeklyAvailabilityBlock): void {
+    this.weeklyBlocks = this.weeklyBlocks.filter(item => item !== block);
+  }
+
+  // -------------------------
+  // Date-specific calendar events
+  // -------------------------
 
   loadManualEvents(): void {
     const from = this.formatDateForApi(this.currentWeekStart);
@@ -211,42 +523,6 @@ export class MentorDashboardComponent implements OnInit {
       .sort((a, b) => a.startTime.localeCompare(b.startTime));
   }
 
-  getBusyBlocks(dayOfWeek: number): WeeklyAvailabilityBlock[] {
-    return this.weeklyBlocks
-      .filter(block =>
-        block.dayOfWeek === dayOfWeek &&
-        block.activityType !== 'Free'
-      )
-      .sort((a, b) => a.startTime.localeCompare(b.startTime));
-  }
-
-  getBlockTop(block: WeeklyAvailabilityBlock): number {
-    const [hours, minutes] = block.startTime.split(':').map(Number);
-    return ((hours * 60 + minutes) - 600) / 60 * 64;
-  }
-
-  getBlockHeight(block: WeeklyAvailabilityBlock): number {
-    const [startHours, startMinutes] = block.startTime.split(':').map(Number);
-    const [endHours, endMinutes] = block.endTime.split(':').map(Number);
-
-    const duration = (endHours * 60 + endMinutes) -
-      (startHours * 60 + startMinutes);
-
-    return Math.max(duration / 60 * 64, 24);
-  }
-
-  getBlockStyle(
-    block: { startTime: string; endTime: string }
-  ): Record<string, string> {
-    const top = this.getBlockTop(block as WeeklyAvailabilityBlock);
-    const height = this.getBlockHeight(block as WeeklyAvailabilityBlock);
-
-    return {
-      top: `${top}px`,
-      height: `${height}px`
-    };
-  }
-
   openEventEditor(date: Date, startHour: number): void {
     if (startHour >= 20) {
       this.errorMessage = 'Choose a time within 10 AM–8 PM.';
@@ -265,32 +541,6 @@ export class MentorDashboardComponent implements OnInit {
     this.successMessage = '';
   }
 
-  addBusyBlock(dayOfWeek: number, startHour = 10): void {
-    const startTime = `${String(startHour).padStart(2, '0')}:00`;
-    const endTime = `${String(Math.min(startHour + 1, 20)).padStart(2, '0')}:00`;
-
-    if (startHour >= 20) {
-      this.errorMessage = 'Choose a time within 10 AM–8 PM.';
-      return;
-    }
-
-    this.weeklyBlocks.push({
-      dayOfWeek,
-      startTime,
-      endTime,
-      isFree: false,
-      activityType: 'Meeting',
-      title: ''
-    });
-
-    this.errorMessage = '';
-    this.successMessage = '';
-  }
-
-  removeBlock(block: WeeklyAvailabilityBlock): void {
-    this.weeklyBlocks = this.weeklyBlocks.filter(item => item !== block);
-  }
-
   saveManualEvent(): void {
     this.errorMessage = '';
     this.successMessage = '';
@@ -300,14 +550,21 @@ export class MentorDashboardComponent implements OnInit {
       return;
     }
 
-    if (!this.eventStartTime || !this.eventEndTime ||
-        this.eventStartTime >= this.eventEndTime) {
+    if (
+      !this.eventStartTime ||
+      !this.eventEndTime ||
+      this.eventStartTime >= this.eventEndTime
+    ) {
       this.errorMessage = 'Please enter a valid start and end time.';
       return;
     }
 
-    if (this.eventStartTime < '10:00' || this.eventEndTime > '20:00') {
-      this.errorMessage = 'Events must be within working hours (10 AM–8 PM).';
+    if (
+      this.eventStartTime < '10:00' ||
+      this.eventEndTime > '20:00'
+    ) {
+      this.errorMessage =
+        'Events must be within working hours (10 AM–8 PM).';
       return;
     }
 
@@ -321,8 +578,12 @@ export class MentorDashboardComponent implements OnInit {
       return;
     }
 
-    if (this.eventType === 'Doubt Session' && !this.studentName.trim()) {
-      this.errorMessage = 'Please enter the student name for the doubt session.';
+    if (
+      this.eventType === 'Doubt Session' &&
+      !this.studentName.trim()
+    ) {
+      this.errorMessage =
+        'Please enter the student name for the doubt session.';
       return;
     }
 
@@ -340,6 +601,7 @@ export class MentorDashboardComponent implements OnInit {
     }).subscribe({
       next: event => {
         this.isSaving = false;
+
         this.manualEvents = [...this.manualEvents, event]
           .sort((a, b) =>
             a.date.localeCompare(b.date) ||
@@ -377,68 +639,9 @@ export class MentorDashboardComponent implements OnInit {
     });
   }
 
-  saveWeeklyAvailability(): void {
-    this.errorMessage = '';
-    this.successMessage = '';
-
-    for (const block of this.weeklyBlocks) {
-      if (!block.startTime || !block.endTime ||
-          block.startTime >= block.endTime) {
-        this.errorMessage = 'Every event must have a valid start and end time.';
-        return;
-      }
-
-      if (block.startTime < '10:00' || block.endTime > '20:00') {
-        this.errorMessage = 'Events must be within working hours (10 AM–8 PM).';
-        return;
-      }
-
-      block.isFree = block.activityType === 'Free';
-    }
-
-    for (const day of this.daysOfWeek) {
-      const dayNumber = this.daysOfWeek.indexOf(day);
-      const blocks = this.weeklyBlocks
-        .filter(block => block.dayOfWeek === dayNumber)
-        .sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-      for (let i = 1; i < blocks.length; i++) {
-        if (blocks[i].startTime < blocks[i - 1].endTime) {
-          this.errorMessage =
-            `Events overlap on ${day}. Please adjust their times.`;
-          return;
-        }
-      }
-    }
-
-    this.isSaving = true;
-
-    this.weeklyAvailabilityService
-      .saveWeeklyAvailability(this.weeklyBlocks)
-      .subscribe({
-        next: response => {
-          this.isSaving = false;
-          this.successMessage =
-            `${response.message} (${response.blocksSaved} events saved).`;
-          this.loadWeeklyAvailability();
-        },
-        error: (error: HttpErrorResponse) => {
-          this.isSaving = false;
-          this.errorMessage =
-            error.error?.message || 'Could not save the calendar.';
-        }
-      });
-  }
-
   formatHour(hour: number): string {
     if (hour === 12) return '12 PM';
     if (hour > 12) return `${hour - 12} PM`;
     return `${hour} AM`;
-  }
-
-  logout(): void {
-    sessionStorage.removeItem('accessToken');
-    sessionStorage.removeItem('user');
-    this.router.navigate(['/login']);
   }
 }

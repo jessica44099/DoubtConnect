@@ -1,8 +1,158 @@
 
 <div class="dashboard">
-  <h1>Welcome to DoubtConnect!</h1>
-  <p>You are logged in as a Student.</p>
-  <h2>Student Dashboard</h2>
-  <p>Your learning journey starts here.</p>
-  <button (click)="logout()">Log Out</button>
+  <header class="topbar">
+    <a class="brand" routerLink="/">
+      <span class="brand-mark">D</span>
+      DoubtConnect
+    </a>
+    <button class="logout-btn" (click)="logout()">Log out</button>
+  </header>
+
+  <main class="content">
+    <section class="welcome">
+      <div>
+        <p class="eyebrow">STUDENT SPACE</p>
+        <h1>Welcome back, {{ studentName }}.</h1>
+        <p class="subtitle">
+          Keep learning, track your sessions and stay on top of your goals.
+        </p>
+      </div>
+      <div class="avatar">
+        {{ studentName.charAt(0).toUpperCase() }}
+      </div>
+    </section>
+
+    <div class="notice error" *ngIf="errorMessage">
+      {{ errorMessage }}
+    </div>
+    <div class="notice success" *ngIf="successMessage">
+      {{ successMessage }}
+    </div>
+
+    <section class="stats">
+      <article class="stat-card">
+        <span class="stat-label">Total sessions attended</span>
+        <strong>{{ totalSessions }}</strong>
+        <span class="stat-foot">Your learning progress</span>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-label">Upcoming sessions</span>
+        <strong>{{ upcomingCount }}</strong>
+        <span class="stat-foot">Approved sessions ahead</span>
+      </article>
+
+      <article class="stat-card">
+        <span class="stat-label">Pending requests</span>
+        <strong>{{ pendingCount }}</strong>
+        <span class="stat-foot">Awaiting mentor response</span>
+      </article>
+    </section>
+
+    <section class="panel">
+      <div class="section-heading">
+        <div>
+          <h2>My sessions</h2>
+          <p>Track your doubt-solving requests and appointments.</p>
+        </div>
+        <button class="refresh-btn" (click)="loadDashboard()">
+          Refresh
+        </button>
+      </div>
+
+      <nav class="filters">
+        <button
+          *ngFor="let filter of ['All', 'Pending', 'Approved', 'Rejected', 'Completed']"
+          [class.selected]="activeFilter === filter"
+          (click)="setFilter(filter)">
+          {{ filter }}
+        </button>
+      </nav>
+
+      <div class="loading" *ngIf="loading">
+        Loading your sessions...
+      </div>
+
+      <div
+        class="empty-state"
+        *ngIf="!loading && filteredBookings.length === 0">
+        <div class="empty-icon">◇</div>
+        <h3>No sessions found</h3>
+        <p>
+          Your session requests will appear here once you book a mentor.
+        </p>
+      </div>
+
+      <div class="booking-list" *ngIf="!loading && filteredBookings.length">
+        <article class="booking-card" *ngFor="let booking of filteredBookings">
+          <div class="booking-main">
+            <div class="booking-icon">✦</div>
+            <div class="booking-info">
+              <h3>{{ booking.doubtTitle }}</h3>
+              <p>Mentor: {{ booking.mentorName }}</p>
+              <p>{{ booking.doubtDescription }}</p>
+              <span class="mode">{{ modeLabel(booking.mode) }}</span>
+            </div>
+          </div>
+
+          <div class="booking-meta">
+            <span class="status" [ngClass]="statusClass(booking.status)">
+              {{ booking.status }}
+            </span>
+            <time>{{ booking.slotStartUtc | date:'medium' }}</time>
+            <a
+              *ngIf="booking.meetingLink && booking.status === 'Approved'"
+              [href]="booking.meetingLink"
+              target="_blank"
+              rel="noopener noreferrer">
+              Join session
+            </a>
+            <p class="rejection" *ngIf="booking.rejectionReason">
+              {{ booking.rejectionReason }}
+            </p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <section class="panel profile-panel">
+      <div class="section-heading">
+        <div>
+          <h2>Your learning profile</h2>
+          <p>Keep your education details up to date.</p>
+        </div>
+      </div>
+
+      <div class="profile-grid">
+        <div class="profile-field">
+          <label>Full name</label>
+          <div class="readonly-field">{{ studentName }}</div>
+        </div>
+
+        <div class="profile-field">
+          <label>Email address</label>
+          <div class="readonly-field">{{ email || 'Not available' }}</div>
+        </div>
+
+        <div class="profile-field">
+          <label>Education level</label>
+          <input
+            [(ngModel)]="educationLevel"
+            maxlength="100"
+            placeholder="e.g. B.Tech, Class 12, B.Sc." />
+        </div>
+      </div>
+
+      <button
+        class="primary-btn"
+        [disabled]="savingProfile"
+        (click)="saveProfile()">
+        {{ savingProfile ? 'Saving...' : 'Save profile' }}
+      </button>
+    </section>
+
+    <footer class="footer">
+      DoubtConnect · Learn together, grow together.
+    </footer>
+  </main>
 </div>
