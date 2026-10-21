@@ -23,8 +23,12 @@ public class ApplicationDbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<SessionRecord> SessionRecords => Set<SessionRecord>();
+
     public DbSet<WeeklyAvailabilityTemplate> WeeklyAvailabilityTemplates
         => Set<WeeklyAvailabilityTemplate>();
+
+    public DbSet<MentorCalendarEvent> MentorCalendarEvents
+        => Set<MentorCalendarEvent>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -270,6 +274,35 @@ public class ApplicationDbContext
             entity.HasOne(t => t.Mentor)
                 .WithMany()
                 .HasForeignKey(t => t.MentorId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        // MENTOR CALENDAR EVENTS
+        builder.Entity<MentorCalendarEvent>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+
+            entity.Property(e => e.ActivityType)
+                .HasMaxLength(50)
+                .IsRequired();
+
+            entity.Property(e => e.Title)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(e => e.StudentName)
+                .HasMaxLength(150);
+
+            entity.HasIndex(e => new
+            {
+                e.MentorId,
+                e.EventDate,
+                e.StartTime
+            });
+
+            entity.HasOne(e => e.Mentor)
+                .WithMany()
+                .HasForeignKey(e => e.MentorId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
     }

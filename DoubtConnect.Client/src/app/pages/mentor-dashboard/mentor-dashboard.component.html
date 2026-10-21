@@ -2,34 +2,267 @@
 <div class="dashboard-page">
   <header class="dashboard-header">
     <a routerLink="/" class="brand">DoubtConnect</a>
-    <button type="button" (click)="logout()">Log Out</button>
+    <button type="button" class="logout-button" (click)="logout()">
+      Log Out
+    </button>
   </header>
 
   <main class="dashboard-content">
-    <p class="eyebrow">MENTOR PORTAL</p>
-    <h1>Welcome, Mentor!</h1>
-    <p class="subtitle">
-      Share your knowledge, guide students, and manage your sessions.
-    </p>
+    <div class="page-heading">
+      <div>
+        <p class="eyebrow">MENTOR PORTAL</p>
+        <h1>My Calendar</h1>
+        <p class="subtitle">
+          Manage your availability, events and student sessions.
+        </p>
+      </div>
+    </div>
 
-    <div class="dashboard-grid">
-      <section class="dashboard-card">
+    <section class="calendar-card">
+      <div class="calendar-toolbar">
+        <div class="calendar-navigation">
+          <button type="button" class="today-button" (click)="goToToday()">
+            Today
+          </button>
+
+          <button
+            type="button"
+            class="nav-button"
+            aria-label="Previous week"
+            (click)="previousWeek()">
+            ‹
+          </button>
+
+          <button
+            type="button"
+            class="nav-button"
+            aria-label="Next week"
+            (click)="nextWeek()">
+            ›
+          </button>
+
+          <h2>{{ weekLabel }}</h2>
+        </div>
+
+        <div class="calendar-legend">
+          <span><i class="legend-dot free-dot"></i>Free time</span>
+          <span><i class="legend-dot busy-dot"></i>Busy event</span>
+        </div>
+      </div>
+
+      <div class="calendar-help">
+        <strong>Working hours: 10:00 AM – 8:00 PM</strong>
+        <span>Unoccupied time inside working hours is automatically free.</span>
+      </div>
+
+      <p *ngIf="isLoading" class="calendar-message">
+        Loading your calendar...
+      </p>
+
+      <p *ngIf="errorMessage" class="error-message" role="alert">
+        {{ errorMessage }}
+      </p>
+
+      <p *ngIf="successMessage" class="success-message" role="status">
+        {{ successMessage }}
+      </p>
+
+      <div class="calendar-scroll" *ngIf="!isLoading">
+        <div class="calendar-grid">
+          <div class="time-zone-heading"></div>
+
+          <div
+            *ngFor="let day of calendarDays"
+            class="day-heading"
+            [class.today-heading]="day.isToday">
+            <span>{{ day.name.slice(0, 3) }}</span>
+            <strong>{{ day.dateLabel }}</strong>
+          </div>
+
+          <ng-container *ngFor="let hour of hours">
+            <div class="time-label">{{ formatHour(hour) }}</div>
+
+            <div
+              *ngFor="let day of calendarDays"
+              class="calendar-cell"
+              [class.today-cell]="day.isToday"
+              (click)="openEventEditor(day.date, hour)"
+              title="Click to add an event at this date and time">
+              <span class="free-indicator">Free</span>
+            </div>
+          </ng-container>
+
+          <div class="time-label end-time-label">8 PM</div>
+          <div
+            *ngFor="let day of calendarDays"
+            class="calendar-end-cell">
+          </div>
+
+          <div class="events-layer">
+            <div
+              *ngFor="let day of calendarDays; let column = index"
+              class="events-column"
+              [style.gridColumn]="column + 2">
+
+              <!-- Existing weekly availability blocks -->
+              <article
+                *ngFor="let block of getBusyBlocks(day.dayOfWeek)"
+                class="calendar-event"
+                [ngClass]="'event-' + block.activityType.toLowerCase()"
+                [ngStyle]="getBlockStyle(block)"
+                (click)="$event.stopPropagation()">
+
+                <strong>{{ block.title || block.activityType }}</strong>
+                <span>{{ block.startTime }} – {{ block.endTime }}</span>
+                <span>{{ block.activityType }}</span>
+
+                <button
+                  type="button"
+                  class="remove-event"
+                  aria-label="Remove availability block"
+                  (click)="removeBlock(block); $event.stopPropagation()">
+                  ×
+                </button>
+              </article>
+
+              <!-- Saved date-specific manual events -->
+              <article
+                *ngFor="let event of getEventsForDay(day.date)"
+                class="calendar-event manual-calendar-event"
+                [ngClass]="'event-' + event.activityType.toLowerCase().replace(' ', '-')"
+                [ngStyle]="getBlockStyle(event)"
+                (click)="$event.stopPropagation()">
+
+                <strong>{{ event.title }}</strong>
+
+                <span>
+                  {{ event.startTime }} – {{ event.endTime }}
+                </span>
+
+                <span>{{ event.activityType }}</span>
+
+                <span *ngIf="event.studentName">
+                  Student: {{ event.studentName }}
+                </span>
+
+                <button
+                  type="button"
+                  class="remove-event"
+                  aria-label="Delete manual calendar event"
+                  (click)="deleteManualEvent(event); $event.stopPropagation()">
+                  ×
+                </button>
+              </article>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="calendar-actions">
+        <p>Click a time cell to prepare an event for that date and time.</p>
+
+        <button
+          type="button"
+          class="save-button"
+          (click)="saveWeeklyAvailability()"
+          [disabled]="isSaving || isLoading">
+          {{ isSaving ? 'Saving...' : 'Save calendar changes' }}
+        </button>
+      </div>
+
+      <!-- Manual event editor -->
+      <section class="event-editor" *ngIf="isEventEditorOpen">
+        <div class="editor-heading">
+          <div>
+            <h3>Add event</h3>
+            <p>Enter the activity details for your selected calendar slot.</p>
+          </div>
+
+          <button
+            type="button"
+            (click)="isEventEditorOpen = false">
+            Cancel
+          </button>
+        </div>
+
+        <div class="editor-fields">
+          <label>
+            Date
+            <input
+              type="date"
+              [(ngModel)]="selectedDate"
+              required />
+          </label>
+
+          <label>
+            Activity
+            <select [(ngModel)]="eventType" required>
+              <option *ngFor="let type of activityTypes" [value]="type">
+                {{ type }}
+              </option>
+            </select>
+          </label>
+
+          <label>
+            Start time
+            <input
+              type="time"
+              [(ngModel)]="eventStartTime"
+              required />
+          </label>
+
+          <label>
+            End time
+            <input
+              type="time"
+              [(ngModel)]="eventEndTime"
+              required />
+          </label>
+
+          <label class="title-field">
+            Event title / activity
+            <input
+              type="text"
+              [(ngModel)]="eventTitle"
+              placeholder="e.g. Mathematics doubt-clearing session"
+              maxlength="200"
+              required />
+          </label>
+
+          <label
+            *ngIf="eventType === 'Doubt Session'"
+            class="title-field">
+            Student name
+            <input
+              type="text"
+              [(ngModel)]="studentName"
+              placeholder="Enter student's name"
+              maxlength="150"
+              required />
+          </label>
+
+          <button
+            type="button"
+            (click)="saveManualEvent()"
+            [disabled]="isSaving">
+            Add event
+          </button>
+        </div>
+      </section>
+    </section>
+
+    <section class="dashboard-grid">
+      <article class="dashboard-card">
         <h2>My Profile</h2>
         <p>Build your mentor profile and showcase your expertise.</p>
         <button type="button" disabled>Coming Soon</button>
-      </section>
+      </article>
 
-      <section class="dashboard-card">
+      <article class="dashboard-card">
         <h2>Session Requests</h2>
-        <p>Review upcoming student booking requests.</p>
+        <p>Review student booking requests and upcoming sessions.</p>
         <button type="button" disabled>Coming Soon</button>
-      </section>
-
-      <section class="dashboard-card">
-        <h2>Availability</h2>
-        <p>Manage when students can book sessions with you.</p>
-        <button type="button" disabled>Coming Soon</button>
-      </section>
-    </div>
+      </article>
+    </section>
   </main>
 </div>
