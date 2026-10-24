@@ -34,6 +34,23 @@ interface MentorProfileResponse {
   } | null;
 }
 
+interface MentorBooking {
+  id: string;
+  studentId: string;
+  studentName: string;
+  mentorId: string;
+  mentorName: string;
+  slotStartUtc: string;
+  slotEndUtc: string;
+  mode: number | string;
+  doubtTitle: string;
+  doubtDescription: string;
+  status: number | string;
+  meetingLink?: string | null;
+  rejectionReason?: string | null;
+  createdAtUtc: string;
+}
+
 @Component({
   selector: 'app-mentor-dashboard',
   standalone: true,
@@ -99,6 +116,11 @@ export class MentorDashboardComponent implements OnInit {
   profileLoading = false;
   profileSaving = false;
 
+  // Real booking data returned by GET /api/bookings/mine.
+  bookings: MentorBooking[] = [];
+  sessionsLoading = false;
+  sessionActionId: string | null = null;
+
   constructor(
     private router: Router,
     private weeklyAvailabilityService: WeeklyAvailabilityService,
@@ -149,6 +171,153 @@ export class MentorDashboardComponent implements OnInit {
     if (section === 'profile') {
       this.loadMentorProfile();
     }
+
+    if (section === 'sessions') {
+      this.loadMentorSessions();
+    }
+  }
+
+  // -------------------------
+  // Mentor sessions
+  // -------------------------
+
+  loadMentorSessions(): void {
+    this.sessionsLoading = true;
+    this.errorMessage = '';
+
+    this.http.get<MentorBooking[]>(
+      `${this.apiUrl}/bookings/mine`,
+      { headers: this.getAuthHeaders() }
+    ).subscribe({
+      next: bookings => {
+        this.bookings = bookings;
+        this.sessionsLoading = false;
+      },
+      error: (error: HttpErrorResponse) => {
+        this.sessionsLoading = false;
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not load your sessions.'
+        );
+      }
+    });
+  }
+
+  get pendingSessions(): MentorBooking[] {
+    return this.bookings
+      .filter(booking => this.getStatusName(booking.status) === 'Pending')
+      .sort((a, b) => a.slotStartUtc.localeCompare(b.slotStartUtc));
+  }
+
+  get upcomingSessions(): MentorBooking[] {
+    const now = Date.now();
+    return this.bookings
+      .filter(booking =>
+        ['Approved', 'Ongoing', 'Rescheduled', 'NeedsReschedule']
+          .includes(this.getStatusName(booking.status)) &&
+        new Date(booking.slotEndUtc).getTime() >= now
+      )
+      .sort((a, b) => a.slotStartUtc.localeCompare(b.slotStartUtc));
+  }
+
+  get pastSessions(): MentorBooking[] {
+    return this.bookings
+      .filter(booking => {
+        const status = this.getStatusName(booking.status);
+        return status === 'Completed' ||
+          status === 'Rejected' ||
+          status === 'Cancelled' ||
+          (['Approved', 'Ongoing', 'Rescheduled', 'NeedsReschedule']
+            .includes(status) &&
+            new Date(booking.slotEndUtc).getTime() < Date.now());
+      })
+      .sort((a, b) => b.slotStartUtc.localeCompare(a.slotStartUtc));
+  }
+
+  getStatusName(status: number | string): string {
+    if (typeof status === 'string' && Number.isNaN(Number(status))) {
+      return status;
+    }
+
+    const names: Record<number, string> = {
+      1: 'Pending',
+      2: 'Approved',
+      3: 'Rejected',
+      4: 'Ongoing',
+      5: 'Completed',
+      6: 'Rescheduled',
+      7: 'NeedsReschedule',
+      8: 'Cancelled'
+    };
+
+    return names[Number(status)] ?? 'Unknown';
+  }
+
+  getModeName(mode: number | string): string {
+    if (typeof mode === 'string' && Number.isNaN(Number(mode))) {
+      return mode;
+    }
+
+    const names: Record<number, string> = {
+      1: 'Video call',
+      2: 'Phone call',
+      3: 'Text chat'
+    };
+
+    return names[Number(mode)] ?? 'Session';
+  }
+
+  approveSession(booking: MentorBooking): void {
+    this.updateSessionStatus(booking, 'approve');
+  }
+
+  rejectSession(booking: MentorBooking): void {
+    this.updateSessionStatus(booking, 'reject');
+  }
+
+  private updateSessionStatus(
+    booking: MentorBooking,
+    action: 'approve' | 'reject'
+  ): void {
+    this.errorMessage = '';
+    this.successMessage = '';
+    this.sessionActionId = booking.id;
+
+    this.http.put<{ message: string }>(
+      `${this.apiUrl}/bookings/${booking.id}/${action}`,
+      action === 'reject' ? { reason: null } : {},
+      { headers: this.getAuthHeaders() }
+    ).subscribe({
+      next: response => {
+        this.sessionActionId = null;
+        this.successMessage = response.message;
+        this.loadMentorSessions();
+      },
+      error: (error: HttpErrorResponse) => {
+        this.sessionActionId = null;
+        this.errorMessage = this.getRequestError(
+          error,
+          `Could not ${action} this session request.`
+        );
+      }
+    });
+  }
+
+  private getRequestError(
+    error: HttpErrorResponse,
+    fallback: string
+  ): string {
+    if (error.status === 401) {
+      return 'Your login session may have expired. Please log out and sign in again, then retry.';
+    }
+
+    if (error.status === 403) {
+      return 'Your account does not have permission to perform this action.';
+    }
+
+    return error.error?.message ||
+      (Array.isArray(error.error?.errors) ? error.error.errors.join(' ') : '') ||
+      fallback;
   }
 
   // -------------------------
@@ -333,9 +502,10 @@ export class MentorDashboardComponent implements OnInit {
       },
       error: (error: HttpErrorResponse) => {
         this.profileSaving = false;
-        this.errorMessage =
-          error.error?.message ??
-          'Could not save your mentor profile. Please try again.';
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not save your mentor profile. Please try again.'
+        );
       }
     });
   }
@@ -613,9 +783,10 @@ export class MentorDashboardComponent implements OnInit {
       },
       error: (error: HttpErrorResponse) => {
         this.isSaving = false;
-        this.errorMessage =
-          error.error?.message ||
-          'Could not save the calendar event. Please try again.';
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not save the calendar event. Please try again.'
+        );
       }
     });
   }
