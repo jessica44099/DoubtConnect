@@ -2,6 +2,7 @@
 using System.Security.Claims;
 using DoubtConnect.Domain.Entities;
 using DoubtConnect.Infrastructure.Data;
+using DoubtConnect.Domain.Enums;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -110,6 +111,27 @@ public class MentorCalendarEventsController : ControllerBase
         if (overlaps)
             return Conflict(new { message = "This event overlaps another manual calendar event." });
 
+        // Calendar times are entered in India Standard Time. Convert them to UTC
+        // before comparing them with booking timestamps stored by the booking API.
+        var indiaTimeZone = GetIndiaTimeZone();
+        var localStart = DateTime.SpecifyKind(date.ToDateTime(start), DateTimeKind.Unspecified);
+        var localEnd = DateTime.SpecifyKind(date.ToDateTime(end), DateTimeKind.Unspecified);
+        var eventStartUtc = TimeZoneInfo.ConvertTimeToUtc(localStart, indiaTimeZone);
+        var eventEndUtc = TimeZoneInfo.ConvertTimeToUtc(localEnd, indiaTimeZone);
+
+        var bookingConflict = await _context.Bookings.AnyAsync(b =>
+            b.MentorId == mentorId &&
+            b.SlotStartUtc < eventEndUtc &&
+            b.SlotEndUtc > eventStartUtc &&
+            (b.Status == BookingStatus.Pending ||
+             b.Status == BookingStatus.Approved ||
+             b.Status == BookingStatus.Ongoing ||
+             b.Status == BookingStatus.Rescheduled ||
+             b.Status == BookingStatus.NeedsReschedule));
+
+        if (bookingConflict)
+            return Conflict(new { message = "This event overlaps an active student booking. Review the session before blocking this time." });
+
         var calendarEvent = new MentorCalendarEvent
         {
             MentorId = mentorId,
@@ -153,6 +175,18 @@ public class MentorCalendarEventsController : ControllerBase
         await _context.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    private static TimeZoneInfo GetIndiaTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+        }
     }
 
     private bool TryGetMentorId(out Guid mentorId)
