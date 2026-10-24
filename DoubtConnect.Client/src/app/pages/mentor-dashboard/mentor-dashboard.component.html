@@ -22,7 +22,7 @@
         <button
           type="button"
           [class.active]="activeSection === 'profile'"
-          (click)="activeSection = 'profile'">
+          (click)="showSection('profile')">
           <span>01</span>
           My Profile
         </button>
@@ -30,7 +30,7 @@
         <button
           type="button"
           [class.active]="activeSection === 'calendar'"
-          (click)="activeSection = 'calendar'">
+          (click)="showSection('calendar')">
           <span>02</span>
           My Calendar
         </button>
@@ -38,7 +38,7 @@
         <button
           type="button"
           [class.active]="activeSection === 'sessions'"
-          (click)="activeSection = 'sessions'">
+          (click)="showSection('sessions')">
           <span>03</span>
           My Sessions
         </button>
@@ -415,13 +415,124 @@
           </div>
         </div>
 
-        <section class="dashboard-card">
-          <h2>Session management</h2>
-          <p>
-            Your booking requests and session history will appear here
-            once the session-management API is connected.
-          </p>
-        </section>
+        <p *ngIf="sessionsLoading" class="calendar-message" role="status">
+          Loading your sessions...
+        </p>
+
+        <ng-container *ngIf="!sessionsLoading">
+          <section class="dashboard-card sessions-card">
+            <div class="sessions-heading">
+              <div>
+                <h2>Requests</h2>
+                <p>Review new student requests and respond to each one.</p>
+              </div>
+              <span class="session-count">{{ pendingSessions.length }}</span>
+            </div>
+
+            <p *ngIf="pendingSessions.length === 0" class="empty-state">
+              You have no pending session requests.
+            </p>
+
+            <article *ngFor="let booking of pendingSessions" class="session-item">
+              <div class="session-item-main">
+                <div class="session-item-title">
+                  <h3>{{ booking.doubtTitle }}</h3>
+                  <span class="status-pill status-pending">Pending</span>
+                </div>
+                <p class="session-student">{{ booking.studentName }}</p>
+                <p class="session-description">{{ booking.doubtDescription }}</p>
+                <p class="session-meta">
+                  {{ booking.slotStartUtc | date:'EEE, d MMM y, h:mm a' }}
+                  – {{ booking.slotEndUtc | date:'h:mm a' }}
+                  · {{ getModeName(booking.mode) }}
+                </p>
+              </div>
+              <div class="session-actions">
+                <button type="button" class="session-approve"
+                  (click)="approveSession(booking)"
+                  [disabled]="sessionActionId === booking.id">
+                  {{ sessionActionId === booking.id ? 'Updating...' : 'Approve' }}
+                </button>
+                <button type="button" class="session-reject"
+                  (click)="rejectSession(booking)"
+                  [disabled]="sessionActionId === booking.id">
+                  Reject
+                </button>
+              </div>
+            </article>
+          </section>
+
+          <section class="dashboard-card sessions-card">
+            <div class="sessions-heading">
+              <div>
+                <h2>Upcoming</h2>
+                <p>Approved sessions that have not ended yet.</p>
+              </div>
+              <span class="session-count">{{ upcomingSessions.length }}</span>
+            </div>
+
+            <p *ngIf="upcomingSessions.length === 0" class="empty-state">
+              No upcoming sessions yet.
+            </p>
+
+            <article *ngFor="let booking of upcomingSessions" class="session-item">
+              <div class="session-item-main">
+                <div class="session-item-title">
+                  <h3>{{ booking.doubtTitle }}</h3>
+                  <span class="status-pill"
+                    [ngClass]="'status-' + getStatusName(booking.status).toLowerCase()">
+                    {{ getStatusName(booking.status) }}
+                  </span>
+                </div>
+                <p class="session-student">{{ booking.studentName }}</p>
+                <p class="session-description">{{ booking.doubtDescription }}</p>
+                <p class="session-meta">
+                  {{ booking.slotStartUtc | date:'EEE, d MMM y, h:mm a' }}
+                  – {{ booking.slotEndUtc | date:'h:mm a' }}
+                  · {{ getModeName(booking.mode) }}
+                </p>
+                <a *ngIf="booking.meetingLink" [href]="booking.meetingLink"
+                  target="_blank" rel="noopener noreferrer">Open meeting link</a>
+              </div>
+            </article>
+          </section>
+
+          <section class="dashboard-card sessions-card">
+            <div class="sessions-heading">
+              <div>
+                <h2>Past sessions</h2>
+                <p>Completed or closed requests and sessions.</p>
+              </div>
+              <span class="session-count">{{ pastSessions.length }}</span>
+            </div>
+
+            <p *ngIf="pastSessions.length === 0" class="empty-state">
+              No past sessions to show.
+            </p>
+
+            <article *ngFor="let booking of pastSessions" class="session-item">
+              <div class="session-item-main">
+                <div class="session-item-title">
+                  <h3>{{ booking.doubtTitle }}</h3>
+                  <span class="status-pill"
+                    [ngClass]="'status-' + getStatusName(booking.status).toLowerCase()">
+                    {{ getStatusName(booking.status) }}
+                  </span>
+                </div>
+                <p class="session-student">{{ booking.studentName }}</p>
+                <p class="session-description">{{ booking.doubtDescription }}</p>
+                <p class="session-meta">
+                  {{ booking.slotStartUtc | date:'EEE, d MMM y, h:mm a' }}
+                  – {{ booking.slotEndUtc | date:'h:mm a' }}
+                  · {{ getModeName(booking.mode) }}
+                </p>
+                <p *ngIf="booking.rejectionReason" class="session-meta">
+                  Reason: {{ booking.rejectionReason }}
+                </p>
+              </div>
+            </article>
+          </section>
+        </ng-container>
       </section>
 
     </main>
