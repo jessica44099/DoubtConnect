@@ -33,6 +33,9 @@ public class Booking
 
     public DateTime? ActualEndUtc { get; set; }
 
+    // Latest estimated finish time when a session is running late.
+    public DateTime? EstimatedEndUtc { get; set; }
+
     public Guid? ShiftedFromBookingId { get; set; }
 
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;

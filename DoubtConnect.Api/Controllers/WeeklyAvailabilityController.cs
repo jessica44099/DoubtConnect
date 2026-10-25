@@ -1,6 +1,8 @@
 
+using System.Globalization;
 using System.Security.Claims;
 using DoubtConnect.Domain.Entities;
+using DoubtConnect.Domain.Enums;
 using DoubtConnect.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +15,10 @@ namespace DoubtConnect.Api.Controllers;
 [Authorize(Roles = "Mentor")]
 public class WeeklyAvailabilityController : ControllerBase
 {
+    private const int MaxScheduleBlocks = 100;
+    private const int MaxActivityTypeLength = 50;
+    private const int MaxTitleLength = 200;
+
     private readonly ApplicationDbContext _context;
 
     public WeeklyAvailabilityController(ApplicationDbContext context)
@@ -25,6 +31,14 @@ public class WeeklyAvailabilityController : ControllerBase
     {
         if (!TryGetMentorId(out var mentorId))
             return Unauthorized();
+
+        if (!await IsActiveMentor(mentorId))
+        {
+            return Unauthorized(new
+            {
+                message = "This mentor account is not active."
+            });
+        }
 
         var saved = await _context.WeeklyAvailabilityTemplates
             .AsNoTracking()
@@ -45,7 +59,7 @@ public class WeeklyAvailabilityController : ControllerBase
         if (saved.Count > 0)
             return Ok(saved);
 
-        // Default timetable: 10:00–20:00, every day.
+        // Default timetable: 10:00–20:00 every day.
         return Ok(Enum.GetValues<DayOfWeek>().Select(day => new
         {
             dayOfWeek = day,
@@ -64,6 +78,14 @@ public class WeeklyAvailabilityController : ControllerBase
         if (!TryGetMentorId(out var mentorId))
             return Unauthorized();
 
+        if (!await IsActiveMentor(mentorId))
+        {
+            return Unauthorized(new
+            {
+                message = "This mentor account is not active."
+            });
+        }
+
         if (request is null || request.Count == 0)
         {
             return BadRequest(new
@@ -72,6 +94,15 @@ public class WeeklyAvailabilityController : ControllerBase
             });
         }
 
+        if (request.Count > MaxScheduleBlocks)
+        {
+            return BadRequest(new
+            {
+                message = $"A maximum of {MaxScheduleBlocks} schedule blocks is allowed."
+            });
+        }
+
+        // Validate every block before changing any saved data.
         foreach (var item in request)
         {
             if (!Enum.IsDefined(typeof(DayOfWeek), item.DayOfWeek))
@@ -82,8 +113,18 @@ public class WeeklyAvailabilityController : ControllerBase
                 });
             }
 
-            if (!TimeOnly.TryParse(item.StartTime, out var start) ||
-                !TimeOnly.TryParse(item.EndTime, out var end))
+            if (!TimeOnly.TryParseExact(
+                    item.StartTime,
+                    "HH:mm",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var start) ||
+                !TimeOnly.TryParseExact(
+                    item.EndTime,
+                    "HH:mm",
+                    CultureInfo.InvariantCulture,
+                    DateTimeStyles.None,
+                    out var end))
             {
                 return BadRequest(new
                 {
@@ -99,23 +140,38 @@ public class WeeklyAvailabilityController : ControllerBase
                 });
             }
 
-            if (string.IsNullOrWhiteSpace(item.ActivityType))
+            if (string.IsNullOrWhiteSpace(item.ActivityType) ||
+                item.ActivityType.Trim().Length > MaxActivityTypeLength)
             {
                 return BadRequest(new
                 {
-                    message = "ActivityType is required."
+                    message = $"ActivityType is required and cannot exceed {MaxActivityTypeLength} characters."
+                });
+            }
+
+            if (item.Title?.Length > MaxTitleLength)
+            {
+                return BadRequest(new
+                {
+                    message = $"Title cannot exceed {MaxTitleLength} characters."
                 });
             }
         }
 
-        // Validate that blocks on the same day do not overlap.
-        foreach (var dayBlocks in request.GroupBy(x => x.DayOfWeek))
+        // Reject overlaps within each day.
+        foreach (var dayGroup in request.GroupBy(x => x.DayOfWeek))
         {
-            var ordered = dayBlocks
+            var ordered = dayGroup
                 .Select(x => new
                 {
-                    Start = TimeOnly.Parse(x.StartTime),
-                    End = TimeOnly.Parse(x.EndTime)
+                    Start = TimeOnly.ParseExact(
+                        x.StartTime,
+                        "HH:mm",
+                        CultureInfo.InvariantCulture),
+                    End = TimeOnly.ParseExact(
+                        x.EndTime,
+                        "HH:mm",
+                        CultureInfo.InvariantCulture)
                 })
                 .OrderBy(x => x.Start)
                 .ToList();
@@ -126,11 +182,16 @@ public class WeeklyAvailabilityController : ControllerBase
                 {
                     return BadRequest(new
                     {
-                        message = $"Schedule blocks overlap on {dayBlocks.Key}."
+                        message = $"Schedule blocks overlap on {dayGroup.Key}."
                     });
                 }
             }
         }
+
+        // Replace the timetable atomically so a failed save cannot leave
+        // the mentor with a partially replaced schedule.
+        await using var transaction =
+            await _context.Database.BeginTransactionAsync();
 
         var existing = await _context.WeeklyAvailabilityTemplates
             .Where(t => t.MentorId == mentorId)
@@ -146,8 +207,14 @@ public class WeeklyAvailabilityController : ControllerBase
                     Id = Guid.NewGuid(),
                     MentorId = mentorId,
                     DayOfWeek = item.DayOfWeek,
-                    StartTime = TimeOnly.Parse(item.StartTime),
-                    EndTime = TimeOnly.Parse(item.EndTime),
+                    StartTime = TimeOnly.ParseExact(
+                        item.StartTime,
+                        "HH:mm",
+                        CultureInfo.InvariantCulture),
+                    EndTime = TimeOnly.ParseExact(
+                        item.EndTime,
+                        "HH:mm",
+                        CultureInfo.InvariantCulture),
                     IsFree = item.IsFree,
                     ActivityType = item.ActivityType.Trim(),
                     Title = string.IsNullOrWhiteSpace(item.Title)
@@ -157,12 +224,21 @@ public class WeeklyAvailabilityController : ControllerBase
         }
 
         await _context.SaveChangesAsync();
+        await transaction.CommitAsync();
 
         return Ok(new
         {
             message = "Weekly timetable saved successfully.",
             blocksSaved = request.Count
         });
+    }
+
+    private async Task<bool> IsActiveMentor(Guid mentorId)
+    {
+        return await _context.Users.AnyAsync(u =>
+            u.Id == mentorId &&
+            u.Role == UserRole.Mentor &&
+            !u.IsDeleted);
     }
 
     private bool TryGetMentorId(out Guid mentorId)

@@ -20,8 +20,6 @@ public class AvailabilityController : ControllerBase
         _context = context;
     }
 
-    // GET: /api/availability/available
-    // Anyone can browse future free slots.
     [AllowAnonymous]
     [HttpGet("available")]
     public async Task<IActionResult> GetAvailableSlots()
@@ -32,9 +30,18 @@ public class AvailabilityController : ControllerBase
             .AsNoTracking()
             .Where(s =>
                 s.Status == AvailabilityStatus.Free &&
-                s.StartTimeUtc > now)
-            .Include(s => s.Mentor)
-                .ThenInclude(m => m.MentorProfile)
+                s.StartTimeUtc > now &&
+                s.Mentor.Role == UserRole.Mentor &&
+                !s.Mentor.IsDeleted &&
+                !_context.Bookings.Any(b =>
+                    b.MentorId == s.MentorId &&
+                    b.SlotStartUtc < s.EndTimeUtc &&
+                    b.SlotEndUtc > s.StartTimeUtc &&
+                    (b.Status == BookingStatus.Pending ||
+                     b.Status == BookingStatus.Approved ||
+                     b.Status == BookingStatus.Ongoing ||
+                     b.Status == BookingStatus.Rescheduled ||
+                     b.Status == BookingStatus.NeedsReschedule)))
             .OrderBy(s => s.StartTimeUtc)
             .Select(s => new
             {
@@ -56,14 +63,15 @@ public class AvailabilityController : ControllerBase
         return Ok(slots);
     }
 
-    // GET: /api/availability/mine
-    // A mentor can see only their own slots.
     [Authorize(Roles = "Mentor")]
     [HttpGet("mine")]
     public async Task<IActionResult> GetMySlots()
     {
         if (!TryGetUserId(out var mentorId))
             return Unauthorized();
+
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
 
         var slots = await _context.AvailabilitySlots
             .AsNoTracking()
@@ -74,53 +82,55 @@ public class AvailabilityController : ControllerBase
         return Ok(slots);
     }
 
-    // POST: /api/availability
     [Authorize(Roles = "Mentor")]
     [HttpPost]
     public async Task<IActionResult> CreateSlot(
-        CreateAvailabilitySlotRequest request)
+        [FromBody] CreateAvailabilitySlotRequest request)
     {
         if (!TryGetUserId(out var mentorId))
             return Unauthorized();
 
-        if (request.StartTimeUtc.Kind != DateTimeKind.Utc ||
-            request.EndTimeUtc.Kind != DateTimeKind.Utc)
-        {
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
+
+        if (!HasUtcTimes(request.StartTimeUtc, request.EndTimeUtc))
             return BadRequest(new
             {
                 message = "Send both times in UTC ISO 8601 format, ending in Z."
             });
-        }
 
-        if (request.StartTimeUtc <= DateTime.UtcNow)
+        var now = DateTime.UtcNow;
+
+        if (request.StartTimeUtc <= now ||
+            request.EndTimeUtc <= request.StartTimeUtc)
         {
             return BadRequest(new
             {
-                message = "The start time must be in the future."
+                message = "Provide a future start time and an end time after it."
             });
         }
 
-        if (request.EndTimeUtc <= request.StartTimeUtc)
+        if ((request.EndTimeUtc - request.StartTimeUtc).TotalHours > 12)
         {
             return BadRequest(new
             {
-                message = "The end time must be after the start time."
+                message = "An availability slot cannot exceed 12 hours."
             });
         }
 
-        // Prevent overlapping slots for this mentor.
         var overlaps = await _context.AvailabilitySlots.AnyAsync(s =>
             s.MentorId == mentorId &&
             s.StartTimeUtc < request.EndTimeUtc &&
             s.EndTimeUtc > request.StartTimeUtc);
 
         if (overlaps)
-        {
-            return Conflict(new
-            {
-                message = "This time overlaps an existing availability slot."
-            });
-        }
+            return Conflict(new { message = "This time overlaps an existing availability slot." });
+
+        var bookingConflict = await HasActiveBooking(
+            mentorId, request.StartTimeUtc, request.EndTimeUtc);
+
+        if (bookingConflict)
+            return Conflict(new { message = "This time overlaps an active booking." });
 
         var slot = new AvailabilitySlot
         {
@@ -129,41 +139,35 @@ public class AvailabilityController : ControllerBase
             StartTimeUtc = request.StartTimeUtc,
             EndTimeUtc = request.EndTimeUtc,
             Status = AvailabilityStatus.Free,
-            CreatedAtUtc = DateTime.UtcNow
+            CreatedAtUtc = now
         };
 
         _context.AvailabilitySlots.Add(slot);
         await _context.SaveChangesAsync();
 
-        return CreatedAtAction(
-            nameof(GetMySlots),
-            new { },
-            slot);
+        return CreatedAtAction(nameof(GetMySlots), new { }, slot);
     }
 
-    // PUT: /api/availability/{id}
     [Authorize(Roles = "Mentor")]
     [HttpPut("{id:guid}")]
     public async Task<IActionResult> UpdateSlot(
         Guid id,
-        UpdateAvailabilitySlotRequest request)
+        [FromBody] UpdateAvailabilitySlotRequest request)
     {
         if (!TryGetUserId(out var mentorId))
             return Unauthorized();
 
-        if (!Enum.IsDefined(typeof(AvailabilityStatus), request.Status))
-        {
-            return BadRequest(new { message = "Invalid availability status." });
-        }
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
 
-        if (request.StartTimeUtc.Kind != DateTimeKind.Utc ||
-            request.EndTimeUtc.Kind != DateTimeKind.Utc)
-        {
+        if (!Enum.IsDefined(typeof(AvailabilityStatus), request.Status))
+            return BadRequest(new { message = "Invalid availability status." });
+
+        if (!HasUtcTimes(request.StartTimeUtc, request.EndTimeUtc))
             return BadRequest(new
             {
                 message = "Send both times in UTC ISO 8601 format, ending in Z."
             });
-        }
 
         if (request.StartTimeUtc <= DateTime.UtcNow ||
             request.EndTimeUtc <= request.StartTimeUtc)
@@ -174,30 +178,35 @@ public class AvailabilityController : ControllerBase
             });
         }
 
-        var slot = await _context.AvailabilitySlots
-            .FirstOrDefaultAsync(s =>
-                s.Id == id && s.MentorId == mentorId);
+        if ((request.EndTimeUtc - request.StartTimeUtc).TotalHours > 12)
+        {
+            return BadRequest(new
+            {
+                message = "An availability slot cannot exceed 12 hours."
+            });
+        }
+
+        var slot = await _context.AvailabilitySlots.FirstOrDefaultAsync(s =>
+            s.Id == id && s.MentorId == mentorId);
 
         if (slot == null)
             return NotFound(new { message = "Availability slot not found." });
-
-        var hasActiveBooking = await HasActiveBooking(
-            mentorId, slot.StartTimeUtc, slot.EndTimeUtc);
 
         var timesChanged =
             slot.StartTimeUtc != request.StartTimeUtc ||
             slot.EndTimeUtc != request.EndTimeUtc;
 
+        if (timesChanged && await HasActiveBooking(
+                mentorId, slot.StartTimeUtc, slot.EndTimeUtc))
+        {
+            return Conflict(new
+            {
+                message = "This slot has an active booking. Its time cannot be changed."
+            });
+        }
+
         if (timesChanged)
         {
-            if (hasActiveBooking)
-            {
-                return Conflict(new
-                {
-                    message = "This slot has an active booking. Its time cannot be changed."
-                });
-            }
-
             var overlaps = await _context.AvailabilitySlots.AnyAsync(s =>
                 s.MentorId == mentorId &&
                 s.Id != id &&
@@ -205,19 +214,17 @@ public class AvailabilityController : ControllerBase
                 s.EndTimeUtc > request.StartTimeUtc);
 
             if (overlaps)
-            {
-                return Conflict(new
-                {
-                    message = "The new time overlaps another availability slot."
-                });
-            }
+                return Conflict(new { message = "The new time overlaps another availability slot." });
         }
 
-        if (request.Status == AvailabilityStatus.Free && hasActiveBooking)
+        var bookingConflict = await HasActiveBooking(
+            mentorId, request.StartTimeUtc, request.EndTimeUtc);
+
+        if (request.Status == AvailabilityStatus.Free && bookingConflict)
         {
             return Conflict(new
             {
-                message = "A slot with an active booking cannot be marked free."
+                message = "A slot overlapping an active booking cannot be marked free."
             });
         }
 
@@ -230,7 +237,6 @@ public class AvailabilityController : ControllerBase
         return Ok(slot);
     }
 
-    // DELETE: /api/availability/{id}
     [Authorize(Roles = "Mentor")]
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteSlot(Guid id)
@@ -238,15 +244,17 @@ public class AvailabilityController : ControllerBase
         if (!TryGetUserId(out var mentorId))
             return Unauthorized();
 
-        var slot = await _context.AvailabilitySlots
-            .FirstOrDefaultAsync(s =>
-                s.Id == id && s.MentorId == mentorId);
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
+
+        var slot = await _context.AvailabilitySlots.FirstOrDefaultAsync(s =>
+            s.Id == id && s.MentorId == mentorId);
 
         if (slot == null)
             return NotFound(new { message = "Availability slot not found." });
 
         if (await HasActiveBooking(
-            mentorId, slot.StartTimeUtc, slot.EndTimeUtc))
+                mentorId, slot.StartTimeUtc, slot.EndTimeUtc))
         {
             return Conflict(new
             {
@@ -258,6 +266,14 @@ public class AvailabilityController : ControllerBase
         await _context.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    private async Task<bool> IsActiveMentor(Guid mentorId)
+    {
+        return await _context.Users.AnyAsync(u =>
+            u.Id == mentorId &&
+            u.Role == UserRole.Mentor &&
+            !u.IsDeleted);
     }
 
     private async Task<bool> HasActiveBooking(
@@ -274,6 +290,12 @@ public class AvailabilityController : ControllerBase
              b.Status == BookingStatus.Ongoing ||
              b.Status == BookingStatus.Rescheduled ||
              b.Status == BookingStatus.NeedsReschedule));
+    }
+
+    private static bool HasUtcTimes(DateTime start, DateTime end)
+    {
+        return start.Kind == DateTimeKind.Utc &&
+               end.Kind == DateTimeKind.Utc;
     }
 
     private bool TryGetUserId(out Guid userId)

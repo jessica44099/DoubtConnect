@@ -28,10 +28,46 @@ interface CalendarDay {
 }
 
 interface MentorProfileResponse {
+  userId?: string;
+  fullName?: string;
+  email?: string;
+  role?: string;
   profile?: {
+    id?: string;
     expertise?: string | null;
     bio?: string | null;
+    education?: string | null;
+    certifications?: string | null;
+    achievements?: string | null;
+    hourlyRate?: number | null;
+    profileCompletionPercentage?: number;
+    isProfileComplete?: boolean;
+    totalDoubtsCleared?: number;
+    completedSessions?: number;
+    distinctStudents?: number;
+    averageRating?: number;
+    totalReviews?: number;
+    completedSessionHours?: number;
   } | null;
+}
+
+interface MentorProfileSaveResponse {
+  message?: string;
+  id?: string;
+  expertise?: string | null;
+  bio?: string | null;
+  education?: string | null;
+  certifications?: string | null;
+  achievements?: string | null;
+  hourlyRate?: number | null;
+  profileCompletionPercentage?: number;
+  isProfileComplete?: boolean;
+  totalDoubtsCleared?: number;
+  completedSessions?: number;
+  distinctStudents?: number;
+  averageRating?: number;
+  totalReviews?: number;
+  completedSessionHours?: number;
 }
 
 interface MentorBooking {
@@ -113,6 +149,14 @@ export class MentorDashboardComponent implements OnInit {
   profileExpertise = '';
   selectedSubjects: string[] = [];
   profileBio = '';
+  profileEducation = '';
+  profileCertifications = '';
+  profileAchievements = '';
+  profileHourlyRate: number | null = null;
+
+  profileCompletionPercentage = 0;
+  isProfileComplete = false;
+
   profileLoading = false;
   profileSaving = false;
 
@@ -211,6 +255,7 @@ export class MentorDashboardComponent implements OnInit {
 
   get upcomingSessions(): MentorBooking[] {
     const now = Date.now();
+
     return this.bookings
       .filter(booking =>
         ['Approved', 'Ongoing', 'Rescheduled', 'NeedsReschedule']
@@ -224,12 +269,15 @@ export class MentorDashboardComponent implements OnInit {
     return this.bookings
       .filter(booking => {
         const status = this.getStatusName(booking.status);
+
         return status === 'Completed' ||
           status === 'Rejected' ||
           status === 'Cancelled' ||
-          (['Approved', 'Ongoing', 'Rescheduled', 'NeedsReschedule']
-            .includes(status) &&
-            new Date(booking.slotEndUtc).getTime() < Date.now());
+          (
+            ['Approved', 'Ongoing', 'Rescheduled', 'NeedsReschedule']
+              .includes(status) &&
+            new Date(booking.slotEndUtc).getTime() < Date.now()
+          );
       })
       .sort((a, b) => b.slotStartUtc.localeCompare(a.slotStartUtc));
   }
@@ -290,7 +338,8 @@ export class MentorDashboardComponent implements OnInit {
     ).subscribe({
       next: response => {
         this.sessionActionId = null;
-        this.successMessage = response.message;
+        this.successMessage =
+          response.message || `Session ${action} action completed.`;
         this.loadMentorSessions();
       },
       error: (error: HttpErrorResponse) => {
@@ -308,7 +357,7 @@ export class MentorDashboardComponent implements OnInit {
     fallback: string
   ): string {
     if (error.status === 401) {
-      return 'Your login session may have expired. Please log out and sign in again, then retry.';
+      return 'Your login session may have expired. Please sign in again.';
     }
 
     if (error.status === 403) {
@@ -316,7 +365,11 @@ export class MentorDashboardComponent implements OnInit {
     }
 
     return error.error?.message ||
-      (Array.isArray(error.error?.errors) ? error.error.errors.join(' ') : '') ||
+      (
+        Array.isArray(error.error?.errors)
+          ? error.error.errors.join(' ')
+          : ''
+      ) ||
       fallback;
   }
 
@@ -418,6 +471,7 @@ export class MentorDashboardComponent implements OnInit {
 
   loadMentorProfile(): void {
     this.profileLoading = true;
+    this.errorMessage = '';
 
     this.http.get<MentorProfileResponse>(
       `${this.apiUrl}/profiles/me`,
@@ -434,13 +488,25 @@ export class MentorDashboardComponent implements OnInit {
           .filter(subject => this.mentorSubjects.includes(subject));
 
         this.profileBio = profile?.bio ?? '';
+        this.profileEducation = profile?.education ?? '';
+        this.profileCertifications = profile?.certifications ?? '';
+        this.profileAchievements = profile?.achievements ?? '';
+        this.profileHourlyRate = profile?.hourlyRate ?? null;
+
+        this.profileCompletionPercentage =
+          profile?.profileCompletionPercentage ?? 0;
+
+        this.isProfileComplete =
+          profile?.isProfileComplete ?? false;
+
         this.profileLoading = false;
       },
       error: (error: HttpErrorResponse) => {
         this.profileLoading = false;
-        this.errorMessage =
-          error.error?.message ??
-          'Could not load your mentor profile. Please sign in again if your session has expired.';
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not load your mentor profile.'
+        );
       }
     });
   }
@@ -484,21 +550,68 @@ export class MentorDashboardComponent implements OnInit {
       return;
     }
 
+    if (this.profileEducation.length > 200) {
+      this.errorMessage = 'Education cannot exceed 200 characters.';
+      return;
+    }
+
+    if (this.profileCertifications.length > 2000) {
+      this.errorMessage = 'Certifications cannot exceed 2000 characters.';
+      return;
+    }
+
+    if (this.profileAchievements.length > 2000) {
+      this.errorMessage = 'Achievements cannot exceed 2000 characters.';
+      return;
+    }
+
+    if (
+      this.profileHourlyRate !== null &&
+      (
+        !Number.isFinite(this.profileHourlyRate) ||
+        this.profileHourlyRate < 0
+      )
+    ) {
+      this.errorMessage = 'Please enter a valid, non-negative hourly rate.';
+      return;
+    }
+
     this.profileSaving = true;
 
-    this.http.put(
+    const payload = {
+      expertise: selectedSubjects.join(', '),
+      bio: this.profileBio.trim() || null,
+      education: this.profileEducation.trim() || null,
+      certifications: this.profileCertifications.trim() || null,
+      achievements: this.profileAchievements.trim() || null,
+      hourlyRate: this.profileHourlyRate
+    };
+
+    this.http.put<MentorProfileSaveResponse>(
       `${this.apiUrl}/profiles/mentor`,
-      {
-        expertise: selectedSubjects.join(', '),
-        bio: this.profileBio.trim() || null
-      },
+      payload,
       { headers: this.getAuthHeaders() }
     ).subscribe({
-      next: () => {
+      next: response => {
         this.profileSaving = false;
+
         this.profileExpertise = selectedSubjects.join(', ');
         this.selectedSubjects = [...selectedSubjects];
-        this.successMessage = 'Mentor profile saved successfully.';
+
+        this.profileBio = payload.bio ?? '';
+        this.profileEducation = payload.education ?? '';
+        this.profileCertifications = payload.certifications ?? '';
+        this.profileAchievements = payload.achievements ?? '';
+        this.profileHourlyRate = payload.hourlyRate;
+
+        this.profileCompletionPercentage =
+          response.profileCompletionPercentage ?? 0;
+
+        this.isProfileComplete =
+          response.isProfileComplete ?? false;
+
+        this.successMessage =
+          response.message || 'Mentor profile saved successfully.';
       },
       error: (error: HttpErrorResponse) => {
         this.profileSaving = false;
@@ -525,9 +638,10 @@ export class MentorDashboardComponent implements OnInit {
       },
       error: (error: HttpErrorResponse) => {
         this.isLoading = false;
-        this.errorMessage =
-          error.error?.message ||
-          'Could not load your timetable. Please sign in again if your session has expired.';
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not load your timetable.'
+        );
       }
     });
   }
@@ -588,8 +702,10 @@ export class MentorDashboardComponent implements OnInit {
         },
         error: (error: HttpErrorResponse) => {
           this.isSaving = false;
-          this.errorMessage =
-            error.error?.message || 'Could not save the calendar.';
+          this.errorMessage = this.getRequestError(
+            error,
+            'Could not save the calendar.'
+          );
         }
       });
   }
@@ -678,9 +794,10 @@ export class MentorDashboardComponent implements OnInit {
         this.manualEvents = events;
       },
       error: (error: HttpErrorResponse) => {
-        this.errorMessage =
-          error.error?.message ||
-          'Could not load date-specific calendar events.';
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not load date-specific calendar events.'
+        );
       }
     });
   }
@@ -803,9 +920,10 @@ export class MentorDashboardComponent implements OnInit {
         this.successMessage = 'Calendar event deleted successfully.';
       },
       error: (error: HttpErrorResponse) => {
-        this.errorMessage =
-          error.error?.message ||
-          'Could not delete the calendar event.';
+        this.errorMessage = this.getRequestError(
+          error,
+          'Could not delete the calendar event.'
+        );
       }
     });
   }
