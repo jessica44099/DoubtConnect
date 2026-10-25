@@ -15,5 +15,12 @@ public class MentorProfile
 
     public int TotalDoubtsCleared { get; set; }
 
+    // Professional profile information.
+    public string? Education { get; set; }
+
+    public string? Certifications { get; set; }
+
+    public string? Achievements { get; set; }
+
     public ApplicationUser User { get; set; } = null!;
 }

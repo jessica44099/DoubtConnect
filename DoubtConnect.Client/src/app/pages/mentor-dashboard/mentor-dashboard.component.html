@@ -22,7 +22,7 @@
         <button
           type="button"
           [class.active]="activeSection === 'profile'"
-          (click)="activeSection = 'profile'">
+          (click)="showSection('profile')">
           <span>01</span>
           My Profile
         </button>
@@ -30,7 +30,7 @@
         <button
           type="button"
           [class.active]="activeSection === 'calendar'"
-          (click)="activeSection = 'calendar'">
+          (click)="showSection('calendar')">
           <span>02</span>
           My Calendar
         </button>
@@ -38,7 +38,7 @@
         <button
           type="button"
           [class.active]="activeSection === 'sessions'"
-          (click)="activeSection = 'sessions'">
+          (click)="showSection('sessions')">
           <span>03</span>
           My Sessions
         </button>
@@ -71,23 +71,67 @@
             <p class="eyebrow">YOUR PROFESSIONAL DETAILS</p>
             <h1>My Profile</h1>
             <p class="subtitle">
-              Tell students what you teach and how you can help them.
+              Tell students what you teach, your qualifications and how you can help them.
             </p>
           </div>
         </div>
 
+        <!-- Profile completion -->
+        <article class="dashboard-card profile-completion-card">
+          <div class="completion-heading">
+            <div>
+              <p class="eyebrow">PROFILE STRENGTH</p>
+              <h2>Complete your mentor profile</h2>
+              <p class="subtitle">
+                Add your professional details to help students understand your experience.
+              </p>
+            </div>
+
+            <div class="completion-percentage">
+              {{ profileCompletionPercentage }}%
+            </div>
+          </div>
+
+          <div
+            class="completion-track"
+            role="progressbar"
+            aria-label="Profile completion"
+            [attr.aria-valuenow]="profileCompletionPercentage"
+            aria-valuemin="0"
+            aria-valuemax="100">
+            <div
+              class="completion-fill"
+              [style.width.%]="profileCompletionPercentage">
+            </div>
+          </div>
+
+          <p
+            class="completion-status"
+            [class.completion-status-complete]="isProfileComplete">
+            {{ isProfileComplete
+              ? 'Your mentor profile is complete.'
+              : 'Your profile is still in progress. Complete the fields below.' }}
+          </p>
+        </article>
+
+        <!-- Profile form -->
         <article class="dashboard-card profile-editor">
           <div class="profile-card-heading">
             <h2>Teaching profile</h2>
-            <p>Select every subject you are comfortable teaching.</p>
+            <p>Keep your professional information accurate and up to date.</p>
           </div>
 
-          <p *ngIf="profileLoading" class="calendar-message">
+          <p *ngIf="profileLoading" class="calendar-message" role="status">
             Loading your profile...
           </p>
 
-          <div *ngIf="!profileLoading" class="profile-form">
+          <form
+            *ngIf="!profileLoading"
+            class="profile-form"
+            #profileForm="ngForm"
+            (ngSubmit)="saveMentorProfile()">
 
+            <!-- Subjects -->
             <fieldset class="subject-fieldset">
               <legend>Teaching subjects <span>*</span></legend>
 
@@ -120,8 +164,10 @@
               </label>
             </fieldset>
 
-            <label for="profileBio">
+            <!-- Bio -->
+            <label for="profileBio" class="profile-field">
               Professional bio <span>*</span>
+
               <textarea
                 id="profileBio"
                 name="profileBio"
@@ -136,14 +182,91 @@
               </small>
             </label>
 
-            <button
-              type="button"
-              class="save-button"
-              (click)="saveMentorProfile()"
-              [disabled]="profileSaving || profileLoading">
-              {{ profileSaving ? 'Saving...' : 'Save profile' }}
-            </button>
-          </div>
+            <!-- Education -->
+            <label for="profileEducation" class="profile-field">
+              Education and qualifications
+
+              <input
+                id="profileEducation"
+                name="profileEducation"
+                type="text"
+                [(ngModel)]="profileEducation"
+                maxlength="200"
+                placeholder="e.g. B.Tech in Computer Science, MBA, relevant degree" />
+
+              <small class="field-hint">
+                Enter your degree, institution or relevant academic qualifications.
+                Maximum 200 characters.
+              </small>
+            </label>
+
+            <!-- Certifications -->
+            <label for="profileCertifications" class="profile-field">
+              Certifications
+
+              <textarea
+                id="profileCertifications"
+                name="profileCertifications"
+                [(ngModel)]="profileCertifications"
+                rows="3"
+                maxlength="2000"
+                placeholder="Add relevant certifications, courses or teaching credentials.">
+              </textarea>
+
+              <small class="field-hint">
+                {{ profileCertifications.length }}/2000 characters
+              </small>
+            </label>
+
+            <!-- Achievements -->
+            <label for="profileAchievements" class="profile-field">
+              Achievements and experience highlights
+
+              <textarea
+                id="profileAchievements"
+                name="profileAchievements"
+                [(ngModel)]="profileAchievements"
+                rows="4"
+                maxlength="2000"
+                placeholder="Share relevant teaching experience, academic achievements or mentoring highlights.">
+              </textarea>
+
+              <small class="field-hint">
+                {{ profileAchievements.length }}/2000 characters
+              </small>
+            </label>
+
+            <!-- Hourly rate -->
+            <label for="profileHourlyRate" class="profile-field">
+              Hourly rate (₹)
+
+              <input
+                id="profileHourlyRate"
+                name="profileHourlyRate"
+                type="number"
+                [(ngModel)]="profileHourlyRate"
+                min="0"
+                step="1"
+                placeholder="e.g. 500" />
+
+              <small class="field-hint">
+                Enter your rate per hour in Indian rupees. Leave blank if you have not decided yet.
+              </small>
+            </label>
+
+            <div class="profile-form-footer">
+              <p class="field-hint">
+                Fields marked with * are required.
+              </p>
+
+              <button
+                type="submit"
+                class="save-button"
+                [disabled]="profileSaving || profileLoading">
+                {{ profileSaving ? 'Saving profile...' : 'Save profile' }}
+              </button>
+            </div>
+          </form>
         </article>
       </section>
 
@@ -415,13 +538,144 @@
           </div>
         </div>
 
-        <section class="dashboard-card">
-          <h2>Session management</h2>
-          <p>
-            Your booking requests and session history will appear here
-            once the session-management API is connected.
-          </p>
-        </section>
+        <p *ngIf="sessionsLoading" class="calendar-message" role="status">
+          Loading your sessions...
+        </p>
+
+        <ng-container *ngIf="!sessionsLoading">
+          <!-- Pending requests -->
+          <section class="dashboard-card sessions-card">
+            <div class="sessions-heading">
+              <div>
+                <h2>Requests</h2>
+                <p>Review new student requests and respond to each one.</p>
+              </div>
+              <span class="session-count">{{ pendingSessions.length }}</span>
+            </div>
+
+            <p *ngIf="pendingSessions.length === 0" class="empty-state">
+              You have no pending session requests.
+            </p>
+
+            <article *ngFor="let booking of pendingSessions" class="session-item">
+              <div class="session-item-main">
+                <div class="session-item-title">
+                  <h3>{{ booking.doubtTitle }}</h3>
+                  <span class="status-pill status-pending">Pending</span>
+                </div>
+                <p class="session-student">{{ booking.studentName }}</p>
+                <p class="session-description">{{ booking.doubtDescription }}</p>
+                <p class="session-meta">
+                  {{ booking.slotStartUtc | date:'EEE, d MMM y, h:mm a' }}
+                  – {{ booking.slotEndUtc | date:'h:mm a' }}
+                  · {{ getModeName(booking.mode) }}
+                </p>
+              </div>
+
+              <div class="session-actions">
+                <button
+                  type="button"
+                  class="session-approve"
+                  (click)="approveSession(booking)"
+                  [disabled]="sessionActionId === booking.id">
+                  {{ sessionActionId === booking.id ? 'Updating...' : 'Approve' }}
+                </button>
+
+                <button
+                  type="button"
+                  class="session-reject"
+                  (click)="rejectSession(booking)"
+                  [disabled]="sessionActionId === booking.id">
+                  Reject
+                </button>
+              </div>
+            </article>
+          </section>
+
+          <!-- Upcoming sessions -->
+          <section class="dashboard-card sessions-card">
+            <div class="sessions-heading">
+              <div>
+                <h2>Upcoming</h2>
+                <p>Approved sessions that have not ended yet.</p>
+              </div>
+              <span class="session-count">{{ upcomingSessions.length }}</span>
+            </div>
+
+            <p *ngIf="upcomingSessions.length === 0" class="empty-state">
+              No upcoming sessions yet.
+            </p>
+
+            <article *ngFor="let booking of upcomingSessions" class="session-item">
+              <div class="session-item-main">
+                <div class="session-item-title">
+                  <h3>{{ booking.doubtTitle }}</h3>
+                  <span
+                    class="status-pill"
+                    [ngClass]="'status-' + getStatusName(booking.status).toLowerCase()">
+                    {{ getStatusName(booking.status) }}
+                  </span>
+                </div>
+
+                <p class="session-student">{{ booking.studentName }}</p>
+                <p class="session-description">{{ booking.doubtDescription }}</p>
+                <p class="session-meta">
+                  {{ booking.slotStartUtc | date:'EEE, d MMM y, h:mm a' }}
+                  – {{ booking.slotEndUtc | date:'h:mm a' }}
+                  · {{ getModeName(booking.mode) }}
+                </p>
+
+                <a
+                  *ngIf="booking.meetingLink"
+                  [href]="booking.meetingLink"
+                  target="_blank"
+                  rel="noopener noreferrer">
+                  Open meeting link
+                </a>
+              </div>
+            </article>
+          </section>
+
+          <!-- Past sessions -->
+          <section class="dashboard-card sessions-card">
+            <div class="sessions-heading">
+              <div>
+                <h2>Past sessions</h2>
+                <p>Completed or closed requests and sessions.</p>
+              </div>
+              <span class="session-count">{{ pastSessions.length }}</span>
+            </div>
+
+            <p *ngIf="pastSessions.length === 0" class="empty-state">
+              No past sessions to show.
+            </p>
+
+            <article *ngFor="let booking of pastSessions" class="session-item">
+              <div class="session-item-main">
+                <div class="session-item-title">
+                  <h3>{{ booking.doubtTitle }}</h3>
+                  <span
+                    class="status-pill"
+                    [ngClass]="'status-' + getStatusName(booking.status).toLowerCase()">
+                    {{ getStatusName(booking.status) }}
+                  </span>
+                </div>
+
+                <p class="session-student">{{ booking.studentName }}</p>
+                <p class="session-description">{{ booking.doubtDescription }}</p>
+                <p class="session-meta">
+                  {{ booking.slotStartUtc | date:'EEE, d MMM y, h:mm a' }}
+                  – {{ booking.slotEndUtc | date:'h:mm a' }}
+                  · {{ getModeName(booking.mode) }}
+                </p>
+
+                <p *ngIf="booking.rejectionReason" class="session-meta">
+                  Reason: {{ booking.rejectionReason }}
+                </p>
+              </div>
+            </article>
+          </section>
+        </ng-container>
       </section>
 
     </main>

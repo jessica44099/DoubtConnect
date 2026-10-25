@@ -1,6 +1,8 @@
 
+using System.Globalization;
 using System.Security.Claims;
 using DoubtConnect.Domain.Entities;
+using DoubtConnect.Domain.Enums;
 using DoubtConnect.Infrastructure.Data;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -13,6 +15,17 @@ namespace DoubtConnect.Api.Controllers;
 [Authorize(Roles = "Mentor")]
 public class MentorCalendarEventsController : ControllerBase
 {
+    private static readonly string[] AllowedActivityTypes =
+    {
+        "Doubt Session",
+        "Meeting",
+        "Class",
+        "Break",
+        "Personal",
+        "Leave",
+        "Other"
+    };
+
     private readonly ApplicationDbContext _context;
 
     public MentorCalendarEventsController(ApplicationDbContext context)
@@ -28,8 +41,16 @@ public class MentorCalendarEventsController : ControllerBase
         if (!TryGetMentorId(out var mentorId))
             return Unauthorized();
 
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
+
         if (from.HasValue && to.HasValue && from.Value > to.Value)
-            return BadRequest(new { message = "'from' must be on or before 'to'." });
+        {
+            return BadRequest(new
+            {
+                message = "'from' must be on or before 'to'."
+            });
+        }
 
         var query = _context.MentorCalendarEvents
             .AsNoTracking()
@@ -46,18 +67,7 @@ public class MentorCalendarEventsController : ControllerBase
             .ThenBy(e => e.StartTime)
             .ToListAsync();
 
-        var events = records.Select(e => new
-        {
-            id = e.Id,
-            date = e.EventDate.ToString("yyyy-MM-dd"),
-            startTime = e.StartTime.ToString("HH:mm"),
-            endTime = e.EndTime.ToString("HH:mm"),
-            activityType = e.ActivityType,
-            title = e.Title,
-            studentName = e.StudentName
-        });
-
-        return Ok(events);
+        return Ok(records.Select(ToResponse));
     }
 
     [HttpPost]
@@ -67,39 +77,20 @@ public class MentorCalendarEventsController : ControllerBase
         if (!TryGetMentorId(out var mentorId))
             return Unauthorized();
 
-        if (!DateOnly.TryParse(request.Date, out var date))
-            return BadRequest(new { message = "Enter a valid event date." });
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
 
-        if (!TimeOnly.TryParse(request.StartTime, out var start) ||
-            !TimeOnly.TryParse(request.EndTime, out var end))
-            return BadRequest(new { message = "Enter valid start and end times." });
+        var validationError = ValidateRequest(
+            request,
+            out var date,
+            out var start,
+            out var end,
+            out var activityType,
+            out var title,
+            out var studentName);
 
-        if (start >= end)
-            return BadRequest(new { message = "End time must be after start time." });
-
-        if (start < new TimeOnly(10, 0) || end > new TimeOnly(20, 0))
-            return BadRequest(new { message = "Events must be within 10 AM–8 PM." });
-
-        var allowedTypes = new[]
-        {
-            "Doubt Session", "Meeting", "Class", "Break",
-            "Personal", "Leave", "Other"
-        };
-
-        if (string.IsNullOrWhiteSpace(request.ActivityType) ||
-            !allowedTypes.Contains(request.ActivityType.Trim()))
-            return BadRequest(new { message = "Select a valid activity type." });
-
-        if (string.IsNullOrWhiteSpace(request.Title) ||
-            request.Title.Trim().Length > 200)
-            return BadRequest(new { message = "Enter an event title (up to 200 characters)." });
-
-        var isDoubtSession = request.ActivityType.Trim() == "Doubt Session";
-
-        if (isDoubtSession &&
-            (string.IsNullOrWhiteSpace(request.StudentName) ||
-             request.StudentName.Trim().Length > 150))
-            return BadRequest(new { message = "Enter the student name for a doubt session." });
+        if (validationError is not null)
+            return BadRequest(new { message = validationError });
 
         var overlaps = await _context.MentorCalendarEvents.AnyAsync(e =>
             e.MentorId == mentorId &&
@@ -108,7 +99,22 @@ public class MentorCalendarEventsController : ControllerBase
             end > e.StartTime);
 
         if (overlaps)
-            return Conflict(new { message = "This event overlaps another manual calendar event." });
+        {
+            return Conflict(new
+            {
+                message = "This event overlaps another manual calendar event."
+            });
+        }
+
+        var (eventStartUtc, eventEndUtc) = ConvertToUtc(date, start, end);
+
+        if (await HasBookingConflict(mentorId, eventStartUtc, eventEndUtc))
+        {
+            return Conflict(new
+            {
+                message = "This event overlaps an active student booking. Review the session before blocking this time."
+            });
+        }
 
         var calendarEvent = new MentorCalendarEvent
         {
@@ -116,25 +122,86 @@ public class MentorCalendarEventsController : ControllerBase
             EventDate = date,
             StartTime = start,
             EndTime = end,
-            ActivityType = request.ActivityType.Trim(),
-            Title = request.Title.Trim(),
-            StudentName = isDoubtSession ? request.StudentName!.Trim() : null,
+            ActivityType = activityType,
+            Title = title,
+            StudentName = studentName,
             CreatedAtUtc = DateTime.UtcNow
         };
 
         _context.MentorCalendarEvents.Add(calendarEvent);
         await _context.SaveChangesAsync();
 
-        return Ok(new
+        return Ok(ToResponse(calendarEvent));
+    }
+
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> UpdateEvent(
+        Guid id,
+        [FromBody] MentorCalendarEventRequest request)
+    {
+        if (!TryGetMentorId(out var mentorId))
+            return Unauthorized();
+
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
+
+        var calendarEvent = await _context.MentorCalendarEvents
+            .FirstOrDefaultAsync(e =>
+                e.Id == id && e.MentorId == mentorId);
+
+        if (calendarEvent is null)
         {
-            id = calendarEvent.Id,
-            date = date.ToString("yyyy-MM-dd"),
-            startTime = start.ToString("HH:mm"),
-            endTime = end.ToString("HH:mm"),
-            activityType = calendarEvent.ActivityType,
-            title = calendarEvent.Title,
-            studentName = calendarEvent.StudentName
-        });
+            return NotFound(new { message = "Calendar event not found." });
+        }
+
+        var validationError = ValidateRequest(
+            request,
+            out var date,
+            out var start,
+            out var end,
+            out var activityType,
+            out var title,
+            out var studentName);
+
+        if (validationError is not null)
+            return BadRequest(new { message = validationError });
+
+        var overlaps = await _context.MentorCalendarEvents.AnyAsync(e =>
+            e.Id != id &&
+            e.MentorId == mentorId &&
+            e.EventDate == date &&
+            start < e.EndTime &&
+            end > e.StartTime);
+
+        if (overlaps)
+        {
+            return Conflict(new
+            {
+                message = "This event overlaps another manual calendar event."
+            });
+        }
+
+        var (eventStartUtc, eventEndUtc) = ConvertToUtc(date, start, end);
+
+        if (await HasBookingConflict(mentorId, eventStartUtc, eventEndUtc))
+        {
+            return Conflict(new
+            {
+                message = "This event overlaps an active student booking. Review the session before blocking this time."
+            });
+        }
+
+        calendarEvent.EventDate = date;
+        calendarEvent.StartTime = start;
+        calendarEvent.EndTime = end;
+        calendarEvent.ActivityType = activityType;
+        calendarEvent.Title = title;
+        calendarEvent.StudentName = studentName;
+        calendarEvent.UpdatedAtUtc = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(ToResponse(calendarEvent));
     }
 
     [HttpDelete("{id:guid}")]
@@ -143,16 +210,172 @@ public class MentorCalendarEventsController : ControllerBase
         if (!TryGetMentorId(out var mentorId))
             return Unauthorized();
 
+        if (!await IsActiveMentor(mentorId))
+            return Unauthorized(new { message = "This mentor account is not active." });
+
         var calendarEvent = await _context.MentorCalendarEvents
-            .FirstOrDefaultAsync(e => e.Id == id && e.MentorId == mentorId);
+            .FirstOrDefaultAsync(e =>
+                e.Id == id && e.MentorId == mentorId);
 
         if (calendarEvent is null)
+        {
             return NotFound(new { message = "Calendar event not found." });
+        }
 
         _context.MentorCalendarEvents.Remove(calendarEvent);
         await _context.SaveChangesAsync();
 
         return NoContent();
+    }
+
+    private static string? ValidateRequest(
+        MentorCalendarEventRequest request,
+        out DateOnly date,
+        out TimeOnly start,
+        out TimeOnly end,
+        out string activityType,
+        out string title,
+        out string? studentName)
+    {
+        date = default;
+        start = default;
+        end = default;
+        activityType = string.Empty;
+        title = string.Empty;
+        studentName = null;
+
+        if (request is null)
+            return "Event details are required.";
+
+        if (!DateOnly.TryParseExact(
+                request.Date,
+                "yyyy-MM-dd",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out date))
+        {
+            return "Enter a valid date in yyyy-MM-dd format.";
+        }
+
+        if (!TimeOnly.TryParseExact(
+                request.StartTime,
+                "HH:mm",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out start) ||
+            !TimeOnly.TryParseExact(
+                request.EndTime,
+                "HH:mm",
+                CultureInfo.InvariantCulture,
+                DateTimeStyles.None,
+                out end))
+        {
+            return "Enter start and end times in HH:mm format.";
+        }
+
+        if (start >= end)
+            return "End time must be after start time.";
+
+        if (start < new TimeOnly(10, 0) ||
+            end > new TimeOnly(20, 0))
+        {
+            return "Events must be within 10 AM–8 PM India time.";
+        }
+
+        activityType = request.ActivityType?.Trim() ?? string.Empty;
+
+        if (!AllowedActivityTypes.Contains(activityType))
+            return "Select a valid activity type.";
+
+        title = request.Title?.Trim() ?? string.Empty;
+
+        if (string.IsNullOrWhiteSpace(title) || title.Length > 200)
+            return "Enter an event title (up to 200 characters).";
+
+        if (activityType == "Doubt Session")
+        {
+            studentName = request.StudentName?.Trim();
+
+            if (string.IsNullOrWhiteSpace(studentName) ||
+                studentName.Length > 150)
+            {
+                return "Enter the student name for a doubt session.";
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<bool> HasBookingConflict(
+        Guid mentorId,
+        DateTime eventStartUtc,
+        DateTime eventEndUtc)
+    {
+        return await _context.Bookings.AnyAsync(b =>
+            b.MentorId == mentorId &&
+            b.SlotStartUtc < eventEndUtc &&
+            b.SlotEndUtc > eventStartUtc &&
+            (b.Status == BookingStatus.Pending ||
+             b.Status == BookingStatus.Approved ||
+             b.Status == BookingStatus.Ongoing ||
+             b.Status == BookingStatus.Rescheduled ||
+             b.Status == BookingStatus.NeedsReschedule));
+    }
+
+    private async Task<bool> IsActiveMentor(Guid mentorId)
+    {
+        return await _context.Users.AnyAsync(u =>
+            u.Id == mentorId &&
+            u.Role == UserRole.Mentor &&
+            !u.IsDeleted);
+    }
+
+    private static (DateTime StartUtc, DateTime EndUtc) ConvertToUtc(
+        DateOnly date,
+        TimeOnly start,
+        TimeOnly end)
+    {
+        var indiaTimeZone = GetIndiaTimeZone();
+
+        var localStart = DateTime.SpecifyKind(
+            date.ToDateTime(start),
+            DateTimeKind.Unspecified);
+
+        var localEnd = DateTime.SpecifyKind(
+            date.ToDateTime(end),
+            DateTimeKind.Unspecified);
+
+        return (
+            TimeZoneInfo.ConvertTimeToUtc(localStart, indiaTimeZone),
+            TimeZoneInfo.ConvertTimeToUtc(localEnd, indiaTimeZone)
+        );
+    }
+
+    private static TimeZoneInfo GetIndiaTimeZone()
+    {
+        try
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("India Standard Time");
+        }
+        catch (TimeZoneNotFoundException)
+        {
+            return TimeZoneInfo.FindSystemTimeZoneById("Asia/Kolkata");
+        }
+    }
+
+    private static object ToResponse(MentorCalendarEvent calendarEvent)
+    {
+        return new
+        {
+            id = calendarEvent.Id,
+            date = calendarEvent.EventDate.ToString("yyyy-MM-dd"),
+            startTime = calendarEvent.StartTime.ToString("HH:mm"),
+            endTime = calendarEvent.EndTime.ToString("HH:mm"),
+            activityType = calendarEvent.ActivityType,
+            title = calendarEvent.Title,
+            studentName = calendarEvent.StudentName,
+            updatedAtUtc = calendarEvent.UpdatedAtUtc
+        };
     }
 
     private bool TryGetMentorId(out Guid mentorId)

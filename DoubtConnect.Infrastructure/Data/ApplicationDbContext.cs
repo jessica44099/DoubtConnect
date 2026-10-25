@@ -23,6 +23,7 @@ public class ApplicationDbContext
     public DbSet<Message> Messages => Set<Message>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<SessionRecord> SessionRecords => Set<SessionRecord>();
+    public DbSet<MentorReview> MentorReviews => Set<MentorReview>();
 
     public DbSet<WeeklyAvailabilityTemplate> WeeklyAvailabilityTemplates
         => Set<WeeklyAvailabilityTemplate>();
@@ -34,7 +35,6 @@ public class ApplicationDbContext
     {
         base.OnModelCreating(builder);
 
-        // USERS
         builder.Entity<ApplicationUser>(entity =>
         {
             entity.Property(u => u.FullName)
@@ -45,7 +45,6 @@ public class ApplicationDbContext
                 .HasConversion<int>();
         });
 
-        // MENTOR PROFILE
         builder.Entity<MentorProfile>(entity =>
         {
             entity.HasKey(p => p.Id);
@@ -63,13 +62,21 @@ public class ApplicationDbContext
             entity.Property(p => p.HourlyRate)
                 .HasPrecision(10, 2);
 
+            entity.Property(p => p.Education)
+                .HasMaxLength(200);
+
+            entity.Property(p => p.Certifications)
+                .HasMaxLength(2000);
+
+            entity.Property(p => p.Achievements)
+                .HasMaxLength(2000);
+
             entity.HasOne(p => p.User)
                 .WithOne(u => u.MentorProfile)
                 .HasForeignKey<MentorProfile>(p => p.UserId)
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // STUDENT PROFILE
         builder.Entity<StudentProfile>(entity =>
         {
             entity.HasKey(p => p.Id);
@@ -86,7 +93,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // AVAILABILITY SLOTS
         builder.Entity<AvailabilitySlot>(entity =>
         {
             entity.HasKey(s => s.Id);
@@ -107,7 +113,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // BOOKINGS
         builder.Entity<Booking>(entity =>
         {
             entity.HasKey(b => b.Id);
@@ -163,7 +168,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // NOTIFICATIONS
         builder.Entity<Notification>(entity =>
         {
             entity.HasKey(n => n.Id);
@@ -192,7 +196,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // MESSAGES
         builder.Entity<Message>(entity =>
         {
             entity.HasKey(m => m.Id);
@@ -218,7 +221,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // REFRESH TOKENS
         builder.Entity<RefreshToken>(entity =>
         {
             entity.HasKey(t => t.Id);
@@ -242,7 +244,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // SESSION RECORDS
         builder.Entity<SessionRecord>(entity =>
         {
             entity.HasKey(r => r.Id);
@@ -255,7 +256,38 @@ public class ApplicationDbContext
                 .IsRequired();
         });
 
-        // WEEKLY AVAILABILITY TEMPLATES
+        builder.Entity<MentorReview>(entity =>
+        {
+            entity.HasKey(r => r.Id);
+
+            entity.HasIndex(r => r.BookingId)
+                .IsUnique();
+
+            entity.Property(r => r.Rating)
+                .IsRequired();
+
+            entity.Property(r => r.Comment)
+                .HasMaxLength(500);
+
+            entity.Property(r => r.CreatedAtUtc)
+                .IsRequired();
+
+            entity.HasOne<Booking>()
+                .WithMany()
+                .HasForeignKey(r => r.BookingId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(r => r.StudentId)
+                .OnDelete(DeleteBehavior.Restrict);
+
+            entity.HasOne<ApplicationUser>()
+                .WithMany()
+                .HasForeignKey(r => r.MentorId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
         builder.Entity<WeeklyAvailabilityTemplate>(entity =>
         {
             entity.HasKey(t => t.Id);
@@ -277,7 +309,6 @@ public class ApplicationDbContext
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        // MENTOR CALENDAR EVENTS
         builder.Entity<MentorCalendarEvent>(entity =>
         {
             entity.HasKey(e => e.Id);

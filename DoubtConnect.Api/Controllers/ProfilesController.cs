@@ -1,3 +1,4 @@
+
 using System.Security.Claims;
 using DoubtConnect.Domain.Entities;
 using DoubtConnect.Domain.Enums;
@@ -27,7 +28,6 @@ public class ProfilesController : ControllerBase
             out userId);
     }
 
-    // GET api/profiles/me
     [HttpGet("me")]
     public async Task<IActionResult> GetMyProfile()
     {
@@ -36,7 +36,7 @@ public class ProfilesController : ControllerBase
 
         var user = await _db.Users
             .AsNoTracking()
-            .FirstOrDefaultAsync(u => u.Id == userId);
+            .FirstOrDefaultAsync(u => u.Id == userId && !u.IsDeleted);
 
         if (user is null)
             return NotFound(new { message = "User not found." });
@@ -49,11 +49,11 @@ public class ProfilesController : ControllerBase
 
             return Ok(new
             {
-                userId = user.Id,
+                UserId = user.Id,
                 user.FullName,
                 user.Email,
-                role = "Student",
-                profile = profile is null ? null : new
+                Role = "Student",
+                Profile = profile is null ? null : new
                 {
                     profile.Id,
                     profile.EducationLevel,
@@ -68,18 +68,33 @@ public class ProfilesController : ControllerBase
                 .AsNoTracking()
                 .FirstOrDefaultAsync(p => p.UserId == userId);
 
+            var statistics = await GetMentorStatistics(userId);
+
+            var completionPercentage = CalculateProfileCompletion(profile);
+
             return Ok(new
             {
-                userId = user.Id,
+                UserId = user.Id,
                 user.FullName,
                 user.Email,
-                role = "Mentor",
-                profile = profile is null ? null : new
+                Role = "Mentor",
+                Profile = new
                 {
-                    profile.Id,
-                    profile.Expertise,
-                    profile.Bio,
-                    profile.TotalDoubtsCleared
+                    profile?.Id,
+                    Expertise = profile?.Expertise,
+                    Bio = profile?.Bio,
+                    profile?.Education,
+                    profile?.Certifications,
+                    profile?.Achievements,
+                    profile?.HourlyRate,
+                    TotalDoubtsCleared = statistics.CompletedSessions,
+                    ProfileCompletionPercentage = completionPercentage,
+                    IsProfileComplete = completionPercentage == 100,
+                    statistics.CompletedSessions,
+                    statistics.DistinctStudents,
+                    statistics.AverageRating,
+                    statistics.TotalReviews,
+                    statistics.CompletedSessionHours
                 }
             });
         }
@@ -87,11 +102,10 @@ public class ProfilesController : ControllerBase
         return BadRequest(new { message = "Unsupported user role." });
     }
 
-    // PUT api/profiles/student
     [Authorize(Roles = "Student")]
     [HttpPut("student")]
     public async Task<IActionResult> UpdateStudentProfile(
-        StudentProfileRequest request)
+        [FromBody] StudentProfileRequest request)
     {
         if (!TryGetUserId(out var userId))
             return Unauthorized();
@@ -103,6 +117,18 @@ public class ProfilesController : ControllerBase
                 message = "Education level cannot exceed 100 characters."
             });
         }
+
+        var activeUserExists = await _db.Users
+            .AnyAsync(u =>
+                u.Id == userId &&
+                u.Role == UserRole.Student &&
+                !u.IsDeleted);
+
+        if (!activeUserExists)
+            return Unauthorized(new
+            {
+                message = "This account is not active."
+            });
 
         var profile = await _db.StudentProfiles
             .FirstOrDefaultAsync(p => p.UserId == userId);
@@ -127,28 +153,39 @@ public class ProfilesController : ControllerBase
 
         return Ok(new
         {
-            message = "Student profile saved successfully.",
+            Message = "Student profile saved successfully.",
             profile.Id,
             profile.EducationLevel,
             profile.TotalSessionsAttended
         });
     }
 
-    // PUT api/profiles/mentor
     [Authorize(Roles = "Mentor")]
     [HttpPut("mentor")]
     public async Task<IActionResult> UpdateMentorProfile(
-        MentorProfileRequest request)
+        [FromBody] MentorProfileRequest request)
     {
         if (!TryGetUserId(out var userId))
             return Unauthorized();
 
-        // Only these three teaching subjects are supported.
+        var activeUserExists = await _db.Users
+            .AnyAsync(u =>
+                u.Id == userId &&
+                u.Role == UserRole.Mentor &&
+                !u.IsDeleted);
+
+        if (!activeUserExists)
+        {
+            return Unauthorized(new
+            {
+                message = "This account is not active."
+            });
+        }
+
         var allowedSubjects = new HashSet<string>(
             new[] { "Quant", "VARC", "DILR" },
             StringComparer.OrdinalIgnoreCase);
 
-        // Accept one or multiple subjects separated by commas.
         var selectedSubjects = (request.Expertise ?? string.Empty)
             .Split(
                 ',',
@@ -182,7 +219,38 @@ public class ProfilesController : ControllerBase
             });
         }
 
-        // Save subjects in a consistent order.
+        if (request.Education?.Length > 200)
+        {
+            return BadRequest(new
+            {
+                message = "Education cannot exceed 200 characters."
+            });
+        }
+
+        if (request.Certifications?.Length > 2000)
+        {
+            return BadRequest(new
+            {
+                message = "Certifications cannot exceed 2000 characters."
+            });
+        }
+
+        if (request.Achievements?.Length > 2000)
+        {
+            return BadRequest(new
+            {
+                message = "Achievements cannot exceed 2000 characters."
+            });
+        }
+
+        if (request.HourlyRate < 0)
+        {
+            return BadRequest(new
+            {
+                message = "Hourly rate cannot be negative."
+            });
+        }
+
         var normalizedSubjects = new[] { "Quant", "VARC", "DILR" }
             .Where(subject => selectedSubjects.Contains(
                 subject,
@@ -204,51 +272,186 @@ public class ProfilesController : ControllerBase
         }
 
         profile.Expertise = string.Join(", ", normalizedSubjects);
-
-        profile.Bio = string.IsNullOrWhiteSpace(request.Bio)
-            ? null
-            : request.Bio.Trim();
+        profile.Bio = NormalizeOptionalText(request.Bio);
+        profile.Education = NormalizeOptionalText(request.Education);
+        profile.Certifications = NormalizeOptionalText(
+            request.Certifications);
+        profile.Achievements = NormalizeOptionalText(
+            request.Achievements);
+        profile.HourlyRate = request.HourlyRate;
 
         await _db.SaveChangesAsync();
 
+        var statistics = await GetMentorStatistics(userId);
+        var completionPercentage = CalculateProfileCompletion(profile);
+
         return Ok(new
         {
-            message = "Mentor profile saved successfully.",
+            Message = "Mentor profile saved successfully.",
             profile.Id,
             profile.Expertise,
             profile.Bio,
-            profile.TotalDoubtsCleared
+            profile.Education,
+            profile.Certifications,
+            profile.Achievements,
+            profile.HourlyRate,
+            TotalDoubtsCleared = statistics.CompletedSessions,
+            ProfileCompletionPercentage = completionPercentage,
+            IsProfileComplete = completionPercentage == 100,
+            statistics.CompletedSessions,
+            statistics.DistinctStudents,
+            statistics.AverageRating,
+            statistics.TotalReviews,
+            statistics.CompletedSessionHours
         });
     }
 
-    // GET api/profiles/mentors/{userId}
-    // Returns public mentor details without private or payment-related fields.
+    [AllowAnonymous]
     [HttpGet("mentors/{userId:guid}")]
     public async Task<IActionResult> GetPublicMentorProfile(Guid userId)
     {
-        var profile = await _db.MentorProfiles
+        var mentor = await _db.Users
             .AsNoTracking()
-            .Where(p => p.UserId == userId)
-            .Select(p => new
+            .Where(u =>
+                u.Id == userId &&
+                u.Role == UserRole.Mentor &&
+                !u.IsDeleted)
+            .Select(u => new
             {
-                p.UserId,
-                name = p.User.FullName,
-                p.Expertise,
-                p.Bio,
-                p.TotalDoubtsCleared
+                u.Id,
+                u.FullName
             })
             .FirstOrDefaultAsync();
 
-        if (profile is null)
+        if (mentor is null)
         {
             return NotFound(new
             {
-                message = "Mentor profile not found."
+                message = "Mentor not found."
             });
         }
 
-        return Ok(profile);
+        var profile = await _db.MentorProfiles
+            .AsNoTracking()
+            .FirstOrDefaultAsync(p => p.UserId == userId);
+
+        var statistics = await GetMentorStatistics(userId);
+        var completionPercentage = CalculateProfileCompletion(profile);
+
+        return Ok(new
+        {
+            UserId = mentor.Id,
+            Name = mentor.FullName,
+            Expertise = profile?.Expertise,
+            Bio = profile?.Bio,
+            Education = profile?.Education,
+            Certifications = profile?.Certifications,
+            Achievements = profile?.Achievements,
+            HourlyRate = profile?.HourlyRate,
+            ProfileCompletionPercentage = completionPercentage,
+            TotalDoubtsCleared = statistics.CompletedSessions,
+            statistics.CompletedSessions,
+            statistics.DistinctStudents,
+            statistics.AverageRating,
+            statistics.TotalReviews,
+            statistics.CompletedSessionHours
+        });
     }
+
+    private async Task<MentorStatistics> GetMentorStatistics(
+        Guid mentorId)
+    {
+        var completedBookings = await _db.Bookings
+            .AsNoTracking()
+            .Where(b =>
+                b.MentorId == mentorId &&
+                b.Status == BookingStatus.Completed)
+            .Select(b => new
+            {
+                b.Id,
+                b.StudentId
+            })
+            .ToListAsync();
+
+        var completedBookingIds = completedBookings
+            .Select(b => b.Id)
+            .ToList();
+
+        var sessionRecords = await _db.SessionRecords
+            .AsNoTracking()
+            .Where(s =>
+                s.MentorId == mentorId &&
+                completedBookingIds.Contains(s.BookingId))
+            .Select(s => new
+            {
+                s.ActualStartUtc,
+                s.ActualEndUtc
+            })
+            .ToListAsync();
+
+        var totalHours = sessionRecords
+            .Where(s => s.ActualEndUtc > s.ActualStartUtc)
+            .Sum(s =>
+                (s.ActualEndUtc - s.ActualStartUtc).TotalHours);
+
+        var reviewRatings = await _db.MentorReviews
+            .AsNoTracking()
+            .Where(r =>
+                r.MentorId == mentorId &&
+                completedBookingIds.Contains(r.BookingId))
+            .Select(r => r.Rating)
+            .ToListAsync();
+
+        var averageRating = reviewRatings.Count == 0
+            ? 0
+            : Math.Round(reviewRatings.Average(), 1);
+
+        return new MentorStatistics(
+            CompletedSessions: completedBookings.Count,
+            DistinctStudents: completedBookings
+                .Select(b => b.StudentId)
+                .Distinct()
+                .Count(),
+            AverageRating: averageRating,
+            TotalReviews: reviewRatings.Count,
+            CompletedSessionHours: Math.Round(totalHours, 2));
+    }
+
+    private static string? NormalizeOptionalText(string? value)
+    {
+        return string.IsNullOrWhiteSpace(value)
+            ? null
+            : value.Trim();
+    }
+
+    private static int CalculateProfileCompletion(
+        MentorProfile? profile)
+    {
+        if (profile is null)
+            return 0;
+
+        // Six profile fields, each worth one-sixth of completion.
+        var completedFields = new[]
+        {
+            !string.IsNullOrWhiteSpace(profile.Expertise),
+            !string.IsNullOrWhiteSpace(profile.Bio),
+            !string.IsNullOrWhiteSpace(profile.Education),
+            !string.IsNullOrWhiteSpace(profile.Certifications),
+            !string.IsNullOrWhiteSpace(profile.Achievements),
+            profile.HourlyRate.HasValue
+        }.Count(isComplete => isComplete);
+
+        return (int)Math.Round(
+            completedFields * 100.0 / 6,
+            MidpointRounding.AwayFromZero);
+    }
+
+    private sealed record MentorStatistics(
+        int CompletedSessions,
+        int DistinctStudents,
+        double AverageRating,
+        int TotalReviews,
+        double CompletedSessionHours);
 }
 
 public sealed class StudentProfileRequest
@@ -261,4 +464,12 @@ public sealed class MentorProfileRequest
     public string Expertise { get; set; } = string.Empty;
 
     public string? Bio { get; set; }
+
+    public string? Education { get; set; }
+
+    public string? Certifications { get; set; }
+
+    public string? Achievements { get; set; }
+
+    public decimal? HourlyRate { get; set; }
 }
